@@ -1,0 +1,62 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+  body {
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+/* Celebration — single firework burst + one-shot headline pop. */
+@keyframes firework-burst {
+  0%   { transform: translate(-50%, -50%) scale(0);  opacity: 1; }
+  40%  { transform: translate(-50%, -50%) scale(1);  opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(14); opacity: 0; }
+}
+
+.firework {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%) scale(0);
+  animation: firework-burst 1.4s ease-out forwards;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.firework::before,
+.firework::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: inherit;
+  box-shadow:
+    0 -26px 0 currentColor,
+    18px -18px 0 currentColor,
+    26px 0 0 currentColor,
+    18px 18px 0 currentColor,
+    0 26px 0 currentColor,
+    -18px 18px 0 currentColor,
+    -26px 0 0 currentColor,
+    -18px -18px 0 currentColor;
+}
+
+.firework::after {
+  transform: rotate(22.5deg);
+}
+
+@keyframes celebrate-pop {
+  0%   { transform: scale(0.6); opacity: 0; }
+  60%  { transform: scale(1.1); opacity: 1; }
+  100% { transform: scale(1);   opacity: 1; }
+}
+
+.celebrate-headline {
+  animation: celebrate-pop 0.6s ease-out both;
+}

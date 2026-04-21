@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:github.com)",
+      "WebSearch",
+      "WebFetch(domain:www.researchgate.net)",
+      "WebFetch(domain:discussion.forum.ircam.fr)",
+      "WebFetch(domain:antescofo-doc.ircam.fr)",
+      "WebFetch(domain:quod.lib.umich.edu)",
+      "WebFetch(domain:hal.science)",
+      "WebFetch(domain:support.ircam.fr)",
+      "WebFetch(domain:ismir2006.ismir.net)",
+      "WebFetch(domain:inria.hal.science)",
+      "WebFetch(domain:zenodo.org)",
+      "Bash(node -e ' *)",
+      "WebFetch(domain:book.verovio.org)",
+      "Bash(npm run *)"
+    ]
+  }
+}

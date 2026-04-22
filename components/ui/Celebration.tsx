@@ -62,7 +62,7 @@ export default function Celebration({ onRestart, onNext, className }: Props) {
       </div>
 
       {/* Headline */}
-      <h2 className="celebrate-headline relative z-10 bg-gradient-to-br from-fuchsia-500 via-amber-400 to-cyan-500 bg-clip-text text-4xl font-extrabold tracking-tight text-transparent drop-shadow-sm md:text-5xl">
+      <h2 className="celebrate-headline relative z-10 bg-gradient-to-br from-fuchsia-500 via-amber-400 to-cyan-500 bg-clip-text text-4xl font-extrabold tracking-tight text-transparent md:text-5xl py-1 px-1">
         {word}
       </h2>
 

@@ -1,33 +1,33 @@
 "use client";
 // ── Mode 3: Melody Practice (measure-by-measure) ──────────────────────────
-// Phase cycle mirrors RhythmMode: prep → playback → prepCount → recording
-// → evaluating (4 beats each). During the RECORDING phase we just buffer
-// raw mic audio; during EVALUATING we hand that buffer to Spotify's Basic
-// Pitch in one shot, which returns `{midi, startSec, durationSec}` note
-// events. Those are quantised onto the 16th-note grid and rendered into
-// the "Your melody" panel before scoring.
+// Phase cycle: prep → playback → prepCount → recording → evaluating
+// During RECORDING the microphone runs real-time pitch detection (pitchy /
+// McLeod Pitch Method). Detected pitch samples are drawn instantly as a
+// continuous orange line on the per-measure piano roll. On entering the
+// EVALUATING phase, samples are compared against the target MIDI notes to
+// colour them green / yellow / red.
 
 import React, {
   useCallback, useEffect, useMemo, useRef, useState,
 } from "react";
-import type { ParsedMelody } from "@/types/music";
+import type { ParsedMelody, NoteEvent } from "@/types/music";
 import type { ScoreRendererHandle } from "@/components/score/ScoreRenderer";
-import type { SungNote } from "@/components/piano-roll/PianoRoll";
 
 import { groupByMeasure } from "@/lib/musicxml/parser";
-import {
-  extractMeasureXml,
-  onsetsToMeasureXml,
-} from "@/lib/musicxml/singleMeasureXml";
+import { extractMeasureXml } from "@/lib/musicxml/singleMeasureXml";
 import { playNote, stopPiano, preloadPiano } from "@/lib/playback/piano";
 import { startMetronome } from "@/lib/playback/metronome";
 import { useMicrophone } from "@/hooks/useMicrophone";
-import {
-  startAudioRecorder, transcribeAudio, preloadBasicPitch,
-  type AudioRecorder, type TranscribedNote,
-} from "@/lib/audio/basicPitchTranscribe";
+import { startPitchDetection } from "@/lib/audio/pitchDetection";
+import type { PitchPoint, MeasureGrade } from "@/components/piano-roll/MeasurePianoRoll";
 import MelodyMeasureCard from "@/components/ui/MelodyMeasureCard";
 import Celebration from "@/components/ui/Celebration";
+
+// ── Semitone thresholds for grading ──────────────────────────────────────
+const GREEN_THRESH  = 2;  // ≤ 2 semitones  → green
+const YELLOW_THRESH = 5;  // ≤ 5 semitones  → yellow
+//                         > 5 semitones  → red
+const PASS_RATIO    = 0.6; // ≥ 60 % weighted score → pass
 
 type Phase =
   | "idle"
@@ -41,21 +41,17 @@ interface Props {
   melody:    ParsedMelody;
   musicXml:  string;
   scoreRef:  React.RefObject<ScoreRendererHandle>;
-  onSungNote: (note: SungNote) => void;
   onComplete: (scorePct: number) => void;
-  /** Optional controlled measure index — keeps the card in the parent
-   *  layout in sync with internal progression. */
   measureIdx?: number;
   onMeasureIdxChange?: (idx: number) => void;
-  /** Called when the celebration's "Next" button is pressed. */
   onNext?: () => void;
 }
 
 export default function MelodyMode({
-  melody, musicXml, scoreRef, onSungNote, onComplete,
+  melody, musicXml, scoreRef, onComplete,
   measureIdx: controlledIdx, onMeasureIdxChange, onNext,
 }: Props) {
-  // ── Measure structure ───────────────────────────────────────────────────
+  // ── Measure structure ────────────────────────────────────────────────────
   const measureMap     = useMemo(() => groupByMeasure(melody.notes), [melody.notes]);
   const measureNumbers = useMemo(
     () => Array.from(measureMap.keys()).sort((a, b) => a - b),
@@ -63,7 +59,7 @@ export default function MelodyMode({
   );
   const totalMeasures = measureNumbers.length;
 
-  // ── Drill state ─────────────────────────────────────────────────────────
+  // ── Drill state ──────────────────────────────────────────────────────────
   const [internalIdx, setInternalIdx] = useState(0);
   const measureIdx = controlledIdx ?? internalIdx;
   const updateMeasureIdx = useCallback((idx: number) => {
@@ -71,53 +67,70 @@ export default function MelodyMode({
     else setInternalIdx(idx);
   }, [onMeasureIdxChange]);
 
-  const [passedMeasures,       setPassedMeasures]       = useState(0);
-  const [phase,                setPhase]                = useState<Phase>("idle");
-  const [isPaused,             setIsPaused]             = useState(false);
-  const [countdownNum,         setCountdownNum]         = useState<number | null>(null);
-  const [transcriptionSlots,   setTranscriptionSlots]   = useState<number[]>([]);
-  const [transcriptionVersion, setTranscriptionVersion] = useState(0); // forces XML rebuild on pitch update
-  const [transcriptionCompact, setTranscriptionCompact] = useState(false);
-  const [resultMsg,            setResultMsg]            = useState<string | null>(null);
-  const [completed,            setCompleted]            = useState(false);
+  const [passedMeasures, setPassedMeasures] = useState(0);
+  const [phase,          setPhase]          = useState<Phase>("idle");
+  const [isPaused,       setIsPaused]       = useState(false);
+  const [countdownNum,   setCountdownNum]   = useState<number | null>(null);
+  const [resultMsg,      setResultMsg]      = useState<string | null>(null);
+  const [completed,      setCompleted]      = useState(false);
 
-  // ── Derived ─────────────────────────────────────────────────────────────
-  const P                    = melody.beatsPerMeasure;
-  const beatDurationSec      = 60 / melody.tempo;
-  const sixteenthDurationSec = beatDurationSec / 4;
-  const currentMeasureNum    = measureNumbers[measureIdx];
-  const currentMeasureNotes  = measureMap.get(currentMeasureNum) ?? [];
-  const measureStartSec      = currentMeasureNotes[0]?.startSec ?? 0;
-  const expectedNotes        = useMemo(
-    () => currentMeasureNotes
-      .filter((n) => !n.isRest)
-      .map((n) => ({ relSec: n.startSec - measureStartSec, midi: n.midi })),
-    [currentMeasureNotes, measureStartSec],
+  // ── Piano-roll state ─────────────────────────────────────────────────────
+  const [pitchLine,  setPitchLine]  = useState<PitchPoint[]>([]);
+  // noteGrades is tied to a specific measureIdx so stale grades never bleed
+  // into the next measure's display.
+  const [noteGradesForMeasure, setNoteGradesForMeasure] = useState<{
+    idx:    number;
+    grades: Map<number, MeasureGrade>;
+  } | null>(null);
+
+  const activeGrades = useMemo(
+    () => noteGradesForMeasure?.idx === measureIdx
+      ? noteGradesForMeasure.grades
+      : new Map<number, MeasureGrade>(),
+    [noteGradesForMeasure, measureIdx],
   );
 
-  // Key signature (fifths) parsed once from the loaded XML — used to make
-  // the "Your melody" staff match the target's accidentals.
-  const fifths = useMemo(() => {
-    const m = musicXml.match(/<fifths>(-?\d+)<\/fifths>/);
-    return m ? parseInt(m[1], 10) : 0;
-  }, [musicXml]);
+  // ── Derived ──────────────────────────────────────────────────────────────
+  const P               = melody.beatsPerMeasure;
+  const beatDurationSec = 60 / melody.tempo;
+  const measureDuration = P * beatDurationSec;
+
+  const currentMeasureNum   = measureNumbers[measureIdx];
+  const currentMeasureNotes = measureMap.get(currentMeasureNum) ?? [];
+  const measureStartSec     = currentMeasureNotes[0]?.startSec ?? 0;
+
+  // Notes with startSec relative to measure start — passed to the piano roll.
+  const measureNotesRelative: NoteEvent[] = useMemo(
+    () => currentMeasureNotes.map(n => ({ ...n, startSec: n.startSec - measureStartSec })),
+    [currentMeasureNotes, measureStartSec],
+  );
 
   const targetXml = useMemo(
     () => extractMeasureXml(musicXml, currentMeasureNum),
     [musicXml, currentMeasureNum],
   );
 
-  // ── Refs (stable across metronome callbacks / timeouts) ─────────────────
-  const phaseRef                  = useRef<Phase>("idle");
-  const phaseBeatRef              = useRef(0);
-  const measureIdxRef             = useRef(0);
-  const passedRef                 = useRef(0);
-  const transcriptionSlotsRef     = useRef<number[]>([]);
-  const transcriptionPitchesRef   = useRef<Map<number, number>>(new Map());
-  const recordingStartRef         = useRef(0);
-  const audioRecorderRef          = useRef<AudioRecorder | null>(null);
-  const stopMetronomeRef          = useRef<(() => void) | null>(null);
-  const [isTranscribing,  setIsTranscribing ]  = useState(false);
+  // ── Refs ─────────────────────────────────────────────────────────────────
+  const phaseRef        = useRef<Phase>("idle");
+  const phaseBeatRef    = useRef(0);
+  const measureIdxRef   = useRef(0);
+  const passedRef       = useRef(0);
+  const recordingStart  = useRef(0);
+
+  // Accumulates PitchPoints during a recording pass.
+  const pitchLineRef    = useRef<PitchPoint[]>([]);
+  // Alignment: offset = firstOnsetRaw - targetFirstNoteSec
+  const onsetOffsetRef  = useRef<number | null>(null);
+  // Cleanup handle for the running pitch detector.
+  const stopPitchRef    = useRef<(() => void) | null>(null);
+  // requestAnimationFrame handle for batching state updates.
+  const rafRef          = useRef<number>(0);
+  // Next measure index to show — set when a measure passes, applied on the
+  // last beat of the following prepCount so the display advances cleanly.
+  const pendingNextIdxRef = useRef<number | null>(null);
+
+  const stopMetronomeRef = useRef<(() => void) | null>(null);
+  const stopDrillRef     = useRef<() => void>(() => {});
 
   useEffect(() => { measureIdxRef.current = measureIdx;     }, [measureIdx]);
   useEffect(() => { passedRef.current     = passedMeasures; }, [passedMeasures]);
@@ -125,50 +138,34 @@ export default function MelodyMode({
   const { start: startMic, stop: stopMic } = useMicrophone();
   const micHandleRef = useRef<Awaited<ReturnType<typeof startMic>> | null>(null);
 
-  // ── Live transcription XML ──────────────────────────────────────────────
-  const transcriptionXml = useMemo(
-    () => onsetsToMeasureXml(
-      transcriptionSlots,
-      P,
-      melody.beatUnit,
-      melody.tempo,
-      transcriptionCompact,
-      transcriptionPitchesRef.current,
-      fifths,
-    ),
-    // transcriptionVersion is a deliberate dep so pitch-only updates (no
-    // new slots) still rebuild the XML.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [transcriptionSlots, transcriptionVersion, transcriptionCompact, P, melody.beatUnit, melody.tempo, fifths],
-  );
+  // ── Preload piano samples ─────────────────────────────────────────────────
+  useEffect(() => { preloadPiano(); }, []);
 
-  // ── Piano sample + Basic Pitch model warmup ─────────────────────────────
-  useEffect(() => { preloadPiano(); preloadBasicPitch(); }, []);
-
-  // ── Schedule target-measure playback at exact metronome beat time ───────
+  // ── Schedule target-measure playback ─────────────────────────────────────
   const schedulePlayback = useCallback((anchorAudioTime: number) => {
-    const idx        = measureIdxRef.current;
+    const idx        = pendingNextIdxRef.current ?? measureIdxRef.current;
     const measureNum = measureNumbers[idx];
     const notes      = measureMap.get(measureNum) ?? [];
     if (notes.length === 0) return;
     const mStart = notes[0].startSec;
     for (const n of notes) {
       if (n.isRest) continue;
-      const whenAudio = anchorAudioTime + (n.startSec - mStart);
-      void playNote(n.midi, n.durationSec, whenAudio);
+      void playNote(n.midi, n.durationSec, anchorAudioTime + (n.startSec - mStart));
     }
   }, [measureNumbers, measureMap]);
 
-  // ── Recording lifecycle ─────────────────────────────────────────────────
-  // The RECORDING phase just captures a raw audio buffer — no live
-  // detection at all. The heavy lifting happens in the EVALUATING phase
-  // when Basic Pitch transcribes the whole measure in one shot.
+  // ── Recording: start real-time pitch detection ────────────────────────────
   const beginRecording = useCallback(async () => {
-    transcriptionSlotsRef.current = [];
-    transcriptionPitchesRef.current = new Map();
-    setTranscriptionSlots([]);
-    setTranscriptionVersion((v) => v + 1);
-    setTranscriptionCompact(false);
+    // Reset pitch line and alignment for this recording pass.
+    pitchLineRef.current  = [];
+    onsetOffsetRef.current = null;
+    cancelAnimationFrame(rafRef.current);
+    setPitchLine([]);
+    setNoteGradesForMeasure(null);
+
+    // Stop any leftover detector from a previous pass.
+    stopPitchRef.current?.();
+    stopPitchRef.current = null;
 
     let handle = micHandleRef.current;
     if (!handle) {
@@ -176,91 +173,94 @@ export default function MelodyMode({
       if (!handle) return;
       micHandleRef.current = handle;
     }
+    recordingStart.current = handle.audioContext.currentTime;
 
-    recordingStartRef.current = handle.audioContext.currentTime;
-    audioRecorderRef.current = startAudioRecorder(
-      handle.audioContext, handle.sourceNode,
+    // Compute target first-note offset once (stable for this measure pass).
+    const idx        = measureIdxRef.current;
+    const measureNum = measureNumbers[idx];
+    const notes      = measureMap.get(measureNum) ?? [];
+    const mStart     = notes[0]?.startSec ?? 0;
+    const firstNote  = notes.find(n => !n.isRest);
+    const targetFirst = firstNote ? firstNote.startSec - mStart : 0;
+
+    const stop = startPitchDetection(
+      handle.audioContext,
+      handle.sourceNode,
+      (sample) => {
+        if (!sample) return;
+        const rawSec = sample.timestampSec - recordingStart.current;
+
+        // Latch onset alignment on the first valid pitch.
+        if (onsetOffsetRef.current === null) {
+          onsetOffsetRef.current = rawSec - targetFirst;
+        }
+
+        const timeSec = rawSec - onsetOffsetRef.current;
+        const midi    = 69 + 12 * Math.log2(sample.frequencyHz / 440);
+
+        pitchLineRef.current.push({ timeSec, midi });
+
+        // Batch display updates to the next animation frame.
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = requestAnimationFrame(() => {
+          setPitchLine(pitchLineRef.current.slice());
+        });
+      },
     );
-  }, [startMic]);
+    stopPitchRef.current = stop;
+  }, [startMic, measureNumbers, measureMap]);
 
-  // Quantise transcribed Basic Pitch notes onto the 16th grid and push
-  // them into the transcription state the XML renderer consumes.
-  const applyTranscription = useCallback((notes: TranscribedNote[]) => {
-    const slots: number[] = [];
-    const pitches = new Map<number, number>();
-    for (const n of notes) {
-      if (n.startSec < -0.15) continue;
-      if (n.startSec > P * beatDurationSec + beatDurationSec) continue;
-      const slot = Math.max(
-        0,
-        Math.min(P * 4 - 1, Math.round(n.startSec / sixteenthDurationSec)),
-      );
-      if (!pitches.has(slot)) {
-        pitches.set(slot, Math.round(n.midi));
-        slots.push(slot);
+  // ── Evaluation: score pitch line against target notes (synchronous) ───────
+  const evaluateMeasure = useCallback(() => {
+    // Halt detection — no new samples after this point.
+    stopPitchRef.current?.();
+    stopPitchRef.current = null;
+    cancelAnimationFrame(rafRef.current);
+
+    const idx        = measureIdxRef.current;
+    const measureNum = measureNumbers[idx];
+    const notes      = measureMap.get(measureNum) ?? [];
+    const mStart     = notes[0]?.startSec ?? 0;
+    const pts        = pitchLineRef.current;
+
+    const grades = new Map<number, MeasureGrade>();
+    let score = 0;
+    let total = 0;
+
+    for (let i = 0; i < notes.length; i++) {
+      const note = notes[i];
+      if (note.isRest) continue;
+      total++;
+
+      const relStart   = note.startSec - mStart;
+      const winStart   = relStart - 0.15;
+      const winEnd     = relStart + note.durationSec + 0.15;
+      const inWindow   = pts.filter(p => p.timeSec >= winStart && p.timeSec <= winEnd);
+
+      if (inWindow.length === 0) {
+        grades.set(i, "red");
+        continue;
       }
-      onSungNote({
-        midi:     Math.round(n.midi),
-        startSec: n.startSec,
-        endSec:   n.startSec + Math.max(0.1, n.durationSec),
-        grade:    "unmatched",
-      });
+
+      const sorted = inWindow.map(p => p.midi).sort((a, b) => a - b);
+      const median = sorted[Math.floor(sorted.length / 2)];
+      // Accept the closer of the sung pitch or its octave-up double.
+      const diff   = Math.min(Math.abs(median - note.midi), Math.abs(median + 12 - note.midi));
+
+      let grade: MeasureGrade;
+      if (diff <= GREEN_THRESH)  { grade = "green";  score += 1; }
+      else if (diff <= YELLOW_THRESH) { grade = "yellow"; score += 0.5; }
+      else                            { grade = "red"; }
+      grades.set(i, grade);
     }
-    slots.sort((a, b) => a - b);
-    transcriptionSlotsRef.current = slots;
-    transcriptionPitchesRef.current = pitches;
-    setTranscriptionSlots(slots);
-    setTranscriptionVersion((v) => v + 1);
-  }, [P, beatDurationSec, sixteenthDurationSec, onSungNote]);
 
-  const stopDrillRef = useRef<() => void>(() => {});
+    setNoteGradesForMeasure({ idx, grades });
 
-  // Score detected vs target slots (onset presence) + pitches (±1 semitone).
-  const scoreMeasure = useCallback(() => {
-    const idx         = measureIdxRef.current;
-    const measureNum  = measureNumbers[idx];
-    const notes       = measureMap.get(measureNum) ?? [];
-    const mStart      = notes[0]?.startSec ?? 0;
-    const targets     = notes
-      .filter((n) => !n.isRest)
-      .map((n) => ({ relSec: n.startSec - mStart, midi: n.midi }));
+    const passPct = total > 0 ? score / total : 1;
+    const passed  = passPct >= PASS_RATIO;
+    const greens  = Array.from(grades.values()).filter(g => g === "green").length;
 
-    const toSlot = (s: number) =>
-      Math.max(0, Math.min(P * 4 - 1, Math.round(s / sixteenthDurationSec)));
-
-    const expectedSlotSet = new Set(targets.map((t) => toSlot(t.relSec)));
-    const expectedPitchBySlot = new Map<number, number>();
-    targets.forEach((t) => {
-      const s = toSlot(t.relSec);
-      if (!expectedPitchBySlot.has(s)) expectedPitchBySlot.set(s, t.midi);
-    });
-
-    const detectedSlotSet = new Set(transcriptionSlotsRef.current);
-
-    let onsetHits = 0;
-    expectedSlotSet.forEach((slot) => {
-      if (detectedSlotSet.has(slot)) onsetHits++;
-    });
-    let pitchHits = 0;
-    expectedSlotSet.forEach((slot) => {
-      const got  = transcriptionPitchesRef.current.get(slot);
-      const want = expectedPitchBySlot.get(slot);
-      if (got !== undefined && want !== undefined && Math.abs(got - want) <= 1) {
-        pitchHits++;
-      }
-    });
-
-    const sizesEqual    = expectedSlotSet.size === detectedSlotSet.size;
-    const rhythmMatches = sizesEqual && onsetHits === expectedSlotSet.size;
-    const pitchMatches  = pitchHits === expectedSlotSet.size;
-    const matches       = rhythmMatches && pitchMatches;
-
-    const expectedCount = expectedSlotSet.size;
-    const passPct = matches
-      ? 1
-      : (expectedCount === 0 ? 0 : (onsetHits + pitchHits) / (2 * expectedCount));
-
-    if (matches) {
+    if (passed) {
       setResultMsg(`✓ Measure ${measureNum} passed (${Math.round(passPct * 100)}%)`);
       const newPassed = passedRef.current + 1;
       passedRef.current = newPassed;
@@ -273,114 +273,100 @@ export default function MelodyMode({
         setCompleted(true);
         onComplete((newPassed / totalMeasures) * 100);
       } else {
-        measureIdxRef.current = nextIdx;
-        updateMeasureIdx(nextIdx);
+        // Don't advance the display yet — wait for the last beat of prepCount.
+        pendingNextIdxRef.current = nextIdx;
       }
     } else {
       setResultMsg(
         `✗ Measure ${measureNum} – try again ` +
-        `(rhythm ${onsetHits}/${expectedCount}, pitch ${pitchHits}/${expectedCount})`,
+        `(${greens}/${total} notes on pitch)`,
       );
     }
-  }, [measureNumbers, measureMap, P, sixteenthDurationSec,
-      totalMeasures, onComplete, updateMeasureIdx]);
+  }, [measureNumbers, measureMap, totalMeasures, onComplete]);
 
-  // Kicks off the transcription pipeline: stop the recorder, hand the
-  // buffer to Basic Pitch, update the visible transcription, then score.
-  // Fires on the first beat of the EVALUATING phase.
-  const beginEvaluation = useCallback(async () => {
-    const rec = audioRecorderRef.current;
-    audioRecorderRef.current = null;
-    if (!rec) { scoreMeasure(); return; }
-    const buf = rec.stop();
-    setIsTranscribing(true);
-    setTranscriptionCompact(true);
-    try {
-      const notes = await transcribeAudio(buf, rec.sampleRate);
-      applyTranscription(notes);
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn("[MelodyMode] Basic Pitch transcription failed:", err);
-    } finally {
-      setIsTranscribing(false);
-      scoreMeasure();
-    }
-  }, [applyTranscription, scoreMeasure]);
-
+  // ── Stop drill ────────────────────────────────────────────────────────────
   const stopDrill = useCallback(() => {
     stopMetronomeRef.current?.();
     stopMetronomeRef.current = null;
-    audioRecorderRef.current?.stop();
-    audioRecorderRef.current = null;
+    stopPitchRef.current?.();
+    stopPitchRef.current = null;
+    cancelAnimationFrame(rafRef.current);
     stopMic();
     micHandleRef.current = null;
     stopPiano();
-    phaseRef.current = "idle";
-    phaseBeatRef.current = 0;
+    phaseRef.current        = "idle";
+    phaseBeatRef.current    = 0;
+    pendingNextIdxRef.current = null;
     setPhase("idle");
     setCountdownNum(null);
-    setIsTranscribing(false);
   }, [stopMic]);
 
   useEffect(() => { stopDrillRef.current = stopDrill; }, [stopDrill]);
 
+  // ── Beat handler ──────────────────────────────────────────────────────────
   const handleBeat = useCallback((_beatIdx: number, audioTime: number) => {
     const curPhase = phaseRef.current;
     const beat     = phaseBeatRef.current;
 
     if (beat === 0) {
       switch (curPhase) {
-        case "playback":   schedulePlayback(audioTime);    break;
-        case "prepCount":  setResultMsg(null);              break;
-        case "recording":  void beginRecording();           break;
-        // evaluating beat 0 = grace beat for trailing onsets
+        case "playback":  schedulePlayback(audioTime); break;
+        case "prepCount": setResultMsg(null);          break;
+        case "recording": void beginRecording();       break;
       }
     }
 
-    // On the first beat of EVALUATING, stop recording → run Basic Pitch →
-    // score. The transcription runs async but the metronome keeps ticking
-    // through the 4-beat evaluating phase to mask its latency.
-    if (curPhase === "evaluating" && beat === 0) {
-      void beginEvaluation();
-    }
+    if (curPhase === "evaluating" && beat === 0) evaluateMeasure();
 
     if (curPhase === "prepCount") setCountdownNum(P - beat);
     else if (curPhase !== "idle") setCountdownNum(null);
 
+    // On the last beat of the prep countdown, advance to the next measure and
+    // clear the singing line so recording starts fresh on the new measure.
+    if (curPhase === "prepCount" && beat === P - 1 && pendingNextIdxRef.current !== null) {
+      const nextIdx = pendingNextIdxRef.current;
+      pendingNextIdxRef.current = null;
+      measureIdxRef.current = nextIdx;
+      updateMeasureIdx(nextIdx);
+      pitchLineRef.current = [];
+      setPitchLine([]);
+      setNoteGradesForMeasure(null);
+    }
+
     const next = beat + 1;
     if (next >= P) {
-      let nextPhase: Phase = curPhase;
-      switch (curPhase) {
-        case "prep":       nextPhase = "playback";   break;
-        case "playback":   nextPhase = "prepCount";  break;
-        case "prepCount":  nextPhase = "recording";  break;
-        case "recording":  nextPhase = "evaluating"; break;
-        case "evaluating": nextPhase = "playback";   break;
-      }
+      const TRANSITIONS: Partial<Record<Phase, Phase>> = {
+        prep:       "playback",
+        playback:   "prepCount",
+        prepCount:  "recording",
+        recording:  "evaluating",
+        evaluating: "playback",
+      };
+      const nextPhase = TRANSITIONS[curPhase] ?? curPhase;
       phaseRef.current     = nextPhase;
       phaseBeatRef.current = 0;
       setPhase(nextPhase);
     } else {
       phaseBeatRef.current = next;
     }
-  }, [P, schedulePlayback, beginRecording, beginEvaluation]);
+  }, [P, schedulePlayback, beginRecording, evaluateMeasure, updateMeasureIdx]);
 
+  // ── Start / pause / resume / restart ─────────────────────────────────────
   const startDrill = useCallback(async () => {
     if (phaseRef.current !== "idle") return;
     phaseRef.current     = "prep";
     phaseBeatRef.current = 0;
     setPhase("prep");
     setIsPaused(false);
-    measureIdxRef.current = 0;
+    measureIdxRef.current   = 0;
+    pendingNextIdxRef.current = null;
     updateMeasureIdx(0);
     setPassedMeasures(0);
     passedRef.current = 0;
     setResultMsg(null);
-    setTranscriptionSlots([]);
-    transcriptionSlotsRef.current = [];
-    transcriptionPitchesRef.current = new Map();
-    setTranscriptionVersion((v) => v + 1);
-    setTranscriptionCompact(false);
+    setPitchLine([]);
+    pitchLineRef.current = [];
+    setNoteGradesForMeasure(null);
     setCompleted(false);
 
     const stop = await startMetronome({
@@ -394,8 +380,8 @@ export default function MelodyMode({
   const pauseDrill = useCallback(() => {
     stopMetronomeRef.current?.();
     stopMetronomeRef.current = null;
-    audioRecorderRef.current?.stop();
-    audioRecorderRef.current = null;
+    stopPitchRef.current?.();
+    stopPitchRef.current = null;
     stopPiano();
     setIsPaused(true);
     setCountdownNum(null);
@@ -418,14 +404,13 @@ export default function MelodyMode({
   }, [stopDrill, startDrill]);
 
   const isDrillActive = phase !== "idle";
-
-  const toggleDrill = useCallback(() => {
-    if (!isDrillActive)   void startDrill();
-    else if (isPaused)    void resumeDrill();
-    else                  pauseDrill();
+  const toggleDrill   = useCallback(() => {
+    if (!isDrillActive) void startDrill();
+    else if (isPaused)  void resumeDrill();
+    else                pauseDrill();
   }, [isDrillActive, isPaused, startDrill, pauseDrill, resumeDrill]);
 
-  // Highlight the current measure on the full-piece score.
+  // ── Highlight current measure on full-piece score ─────────────────────────
   useEffect(() => {
     const handle = scoreRef.current;
     if (!handle) return;
@@ -433,13 +418,8 @@ export default function MelodyMode({
     else                  handle.highlightMeasure(currentMeasureNum);
   }, [phase, currentMeasureNum, scoreRef]);
 
-  // Cleanup on unmount.
-  useEffect(() => {
-    return () => {
-      stopDrill();
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // ── Cleanup on unmount ────────────────────────────────────────────────────
+  useEffect(() => () => { stopDrill(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const measureLabel = `M${currentMeasureNum} (${measureIdx + 1}/${totalMeasures})`;
 
@@ -454,7 +434,7 @@ export default function MelodyMode({
         </div>
       )}
 
-      {/* Drill card — target ↔ your melody */}
+      {/* Measure card */}
       {completed ? (
         <div className="rounded-2xl border border-zinc-100 p-4">
           <Celebration
@@ -466,19 +446,15 @@ export default function MelodyMode({
         <MelodyMeasureCard
           measureLabel={measureLabel}
           targetXml={targetXml}
-          yourXml={transcriptionXml}
-          status={
-            phase === "recording"
-              ? "recording"
-              : (phase === "evaluating" && isTranscribing)
-                ? "transcribing"
-                : null
-          }
+          measureNotes={measureNotesRelative}
+          measureDuration={measureDuration}
+          pitchLine={pitchLine}
+          noteGrades={activeGrades}
+          isRecording={phase === "recording"}
         />
       )}
 
-      {/* Control strip — Start/Pause + Restart, placed directly below the
-          measure-by-measure card (per spec). */}
+      {/* Controls */}
       {!completed && (
         <div className="flex items-center gap-2">
           <button
@@ -505,7 +481,6 @@ export default function MelodyMode({
           <button
             onClick={() => void restartDrill()}
             disabled={!isDrillActive}
-            title="Restart from measure 1"
             className="flex h-9 items-center gap-2 rounded-full border border-zinc-200 bg-white px-4 text-sm font-medium text-zinc-700 hover:bg-zinc-50 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
@@ -515,7 +490,6 @@ export default function MelodyMode({
             Restart
           </button>
 
-          {/* Phase indicator */}
           <div className="ml-auto flex items-center gap-3 text-xs text-zinc-400">
             {phase === "recording" && (
               <span className="flex items-center gap-2 text-red-500">
@@ -524,6 +498,7 @@ export default function MelodyMode({
               </span>
             )}
             {phase === "playback" && <span className="text-indigo-600">Playing target…</span>}
+            {phase === "evaluating" && <span className="text-zinc-500">Grading…</span>}
           </div>
         </div>
       )}
@@ -537,13 +512,9 @@ export default function MelodyMode({
       </div>
 
       {resultMsg && (
-        <p
-          className={`rounded-lg px-3 py-2 text-sm font-medium ${
-            resultMsg.startsWith("✓")
-              ? "bg-green-50 text-green-700"
-              : "bg-red-50 text-red-600"
-          }`}
-        >
+        <p className={`rounded-lg px-3 py-2 text-sm font-medium ${
+          resultMsg.startsWith("✓") ? "bg-green-50 text-green-700" : "bg-red-50 text-red-600"
+        }`}>
           {resultMsg}
         </p>
       )}

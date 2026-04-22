@@ -13,5 +13,7 @@ export function extractRhythmXML(xmlText: string): string {
   result = result.replace(/(<fifths>)([-\d]+)(<\/fifths>)/g, "$10$3");
   // Remove any transposing-instrument elements
   result = result.replace(/<transpose>[\s\S]*?<\/transpose>/g, "");
+  // Strip explicit accidental display elements (pitch is now B natural)
+  result = result.replace(/<accidental[^>]*>[\s\S]*?<\/accidental>/g, "");
   return result;
 }

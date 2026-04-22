@@ -386,7 +386,6 @@ export default function PracticePage() {
               melody={activeMelody}
               musicXml={transposedXML}
               scoreRef={scoreRef}
-              onSungNote={handleSungNote}
               onComplete={(pct) => handleModeComplete(3, pct)}
               measureIdx={melodyMeasureIdx}
               onMeasureIdxChange={setMelodyMeasureIdx}
@@ -396,7 +395,7 @@ export default function PracticePage() {
         )}
 
         {/* ── Drag handle ───────────────────────────────── */}
-        {mode !== 2 && (
+        {mode !== 2 && mode !== 3 && (
           <div
             className="flex h-3 cursor-row-resize items-center justify-center bg-zinc-50 hover:bg-zinc-100 border-b border-zinc-100 flex-shrink-0 select-none"
             onMouseDown={(e) => {
@@ -407,8 +406,8 @@ export default function PracticePage() {
           </div>
         )}
 
-        {/* ── Piano roll (hidden in Rhythm mode) ───────────────────── */}
-        {mode !== 2 && (
+        {/* ── Piano roll (hidden in Rhythm mode and Melody drill mode) ───── */}
+        {mode !== 2 && mode !== 3 && (
           <section className="px-4 py-2 flex-shrink-0">
             <div style={{ height: rollHeight }}>
               <PianoRoll

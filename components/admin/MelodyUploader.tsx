@@ -31,8 +31,9 @@ export default function MelodyUploader({ onUploaded }: Props) {
           body: JSON.stringify({ title: title.trim(), musicxml_content: xmlText }),
         });
         if (!res.ok) {
-          const d = await res.json();
-          throw new Error(d.error ?? "Upload failed");
+          let msg = "Upload failed";
+          try { const d = await res.json(); msg = d.error ?? msg; } catch {}
+          throw new Error(msg);
         }
         setSuccess(true);
         setTitle("");

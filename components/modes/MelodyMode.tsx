@@ -21,13 +21,17 @@ import { useMicrophone } from "@/hooks/useMicrophone";
 import { startPitchDetection } from "@/lib/audio/pitchDetection";
 import type { PitchPoint, MeasureGrade } from "@/components/piano-roll/MeasurePianoRoll";
 import MelodyMeasureCard from "@/components/ui/MelodyMeasureCard";
+import type { MeasurePianoRollHandle } from "@/components/piano-roll/MeasurePianoRoll";
 import Celebration from "@/components/ui/Celebration";
 
 // ── Semitone thresholds for grading ──────────────────────────────────────
-const GREEN_THRESH  = 2;  // ≤ 2 semitones  → green
-const YELLOW_THRESH = 5;  // ≤ 5 semitones  → yellow
-//                         > 5 semitones  → red
-const PASS_RATIO    = 0.6; // ≥ 60 % weighted score → pass
+// Prior defaults (green≤2, yellow≤5, pass 60 %) were too forgiving — a
+// consistent whole-step-off performance still passed. Tightened so only
+// near-in-tune singing passes:
+const GREEN_THRESH  = 1;    // ≤ 1 semitone   → green  (full credit)
+const YELLOW_THRESH = 2;    // ≤ 2 semitones  → yellow (half credit)
+//                          > 2 semitones  → red    (no credit)
+const PASS_RATIO    = 0.80; // ≥ 80 % weighted → pass
 
 type Phase =
   | "idle"
@@ -75,19 +79,29 @@ export default function MelodyMode({
   const [completed,      setCompleted]      = useState(false);
 
   // ── Piano-roll state ─────────────────────────────────────────────────────
-  const [pitchLine,  setPitchLine]  = useState<PitchPoint[]>([]);
-  // noteGrades is tied to a specific measureIdx so stale grades never bleed
-  // into the next measure's display.
+  // Pitch line is pushed imperatively to the canvas via `rollRef` — no
+  // React state involved for the hot path. Grades remain in state because
+  // they only change once per evaluation.
+  const rollRef = useRef<MeasurePianoRollHandle>(null);
   const [noteGradesForMeasure, setNoteGradesForMeasure] = useState<{
     idx:    number;
     grades: Map<number, MeasureGrade>;
   } | null>(null);
 
+  // ── Two-track display index ──────────────────────────────────────────────
+  // `measureIdx` tracks the TARGET score (top of the card). On a pass it
+  // advances immediately so the student can read ahead during the 4-beat
+  // intermission. `rollIdx` tracks the PIANO ROLL (bottom); it lags by the
+  // intermission so the student can still see what they just sang, and
+  // only flips to the new measure on the final beat of prepCount right
+  // before recording starts.
+  const [rollIdx, setRollIdx] = useState(0);
+
   const activeGrades = useMemo(
-    () => noteGradesForMeasure?.idx === measureIdx
+    () => noteGradesForMeasure?.idx === rollIdx
       ? noteGradesForMeasure.grades
       : new Map<number, MeasureGrade>(),
-    [noteGradesForMeasure, measureIdx],
+    [noteGradesForMeasure, rollIdx],
   );
 
   // ── Derived ──────────────────────────────────────────────────────────────
@@ -95,19 +109,20 @@ export default function MelodyMode({
   const beatDurationSec = 60 / melody.tempo;
   const measureDuration = P * beatDurationSec;
 
-  const currentMeasureNum   = measureNumbers[measureIdx];
-  const currentMeasureNotes = measureMap.get(currentMeasureNum) ?? [];
-  const measureStartSec     = currentMeasureNotes[0]?.startSec ?? 0;
-
-  // Notes with startSec relative to measure start — passed to the piano roll.
-  const measureNotesRelative: NoteEvent[] = useMemo(
-    () => currentMeasureNotes.map(n => ({ ...n, startSec: n.startSec - measureStartSec })),
-    [currentMeasureNotes, measureStartSec],
-  );
-
+  // TARGET side (sheet music + label).
+  const currentMeasureNum = measureNumbers[measureIdx];
   const targetXml = useMemo(
     () => extractMeasureXml(musicXml, currentMeasureNum),
     [musicXml, currentMeasureNum],
+  );
+
+  // ROLL side (piano roll + grades). Lags target during the intermission.
+  const rollMeasureNum   = measureNumbers[rollIdx];
+  const rollMeasureNotes = measureMap.get(rollMeasureNum) ?? [];
+  const rollStartSec     = rollMeasureNotes[0]?.startSec ?? 0;
+  const measureNotesRelative: NoteEvent[] = useMemo(
+    () => rollMeasureNotes.map((n) => ({ ...n, startSec: n.startSec - rollStartSec })),
+    [rollMeasureNotes, rollStartSec],
   );
 
   // ── Refs ─────────────────────────────────────────────────────────────────
@@ -159,8 +174,7 @@ export default function MelodyMode({
     // Reset pitch line and alignment for this recording pass.
     pitchLineRef.current  = [];
     onsetOffsetRef.current = null;
-    cancelAnimationFrame(rafRef.current);
-    setPitchLine([]);
+    rollRef.current?.clearPitchLine();
     setNoteGradesForMeasure(null);
 
     // Stop any leftover detector from a previous pass.
@@ -199,12 +213,9 @@ export default function MelodyMode({
         const midi    = 69 + 12 * Math.log2(sample.frequencyHz / 440);
 
         pitchLineRef.current.push({ timeSec, midi });
-
-        // Batch display updates to the next animation frame.
-        cancelAnimationFrame(rafRef.current);
-        rafRef.current = requestAnimationFrame(() => {
-          setPitchLine(pitchLineRef.current.slice());
-        });
+        // Imperative push — the canvas redraws on its own rAF without any
+        // React state update in this hot path.
+        rollRef.current?.pushPitchPoint({ timeSec, midi });
       },
     );
     stopPitchRef.current = stop;
@@ -273,7 +284,13 @@ export default function MelodyMode({
         setCompleted(true);
         onComplete((newPassed / totalMeasures) * 100);
       } else {
-        // Don't advance the display yet — wait for the last beat of prepCount.
+        // Advance the TARGET score immediately so the student can read the
+        // next measure during the playback/prepCount intermission. The
+        // piano roll stays on the measure they just sang (with grades
+        // still coloured) — `pendingNextIdxRef` holds the roll's next
+        // index and is applied on the last beat of prepCount.
+        measureIdxRef.current = nextIdx;
+        updateMeasureIdx(nextIdx);
         pendingNextIdxRef.current = nextIdx;
       }
     } else {
@@ -321,15 +338,16 @@ export default function MelodyMode({
     if (curPhase === "prepCount") setCountdownNum(P - beat);
     else if (curPhase !== "idle") setCountdownNum(null);
 
-    // On the last beat of the prep countdown, advance to the next measure and
-    // clear the singing line so recording starts fresh on the new measure.
-    if (curPhase === "prepCount" && beat === P - 1 && pendingNextIdxRef.current !== null) {
+    // On the FIRST beat of prepCount — i.e. after the 4-beat evaluating
+    // intermission + 4-beat playback of the next target measure have both
+    // elapsed — catch the piano roll up to the target score and wipe the
+    // sung line so recording starts clean.
+    if (curPhase === "prepCount" && beat === 0 && pendingNextIdxRef.current !== null) {
       const nextIdx = pendingNextIdxRef.current;
       pendingNextIdxRef.current = null;
-      measureIdxRef.current = nextIdx;
-      updateMeasureIdx(nextIdx);
+      setRollIdx(nextIdx);
       pitchLineRef.current = [];
-      setPitchLine([]);
+      rollRef.current?.clearPitchLine();
       setNoteGradesForMeasure(null);
     }
 
@@ -361,11 +379,12 @@ export default function MelodyMode({
     measureIdxRef.current   = 0;
     pendingNextIdxRef.current = null;
     updateMeasureIdx(0);
+    setRollIdx(0);
     setPassedMeasures(0);
     passedRef.current = 0;
     setResultMsg(null);
-    setPitchLine([]);
     pitchLineRef.current = [];
+    rollRef.current?.clearPitchLine();
     setNoteGradesForMeasure(null);
     setCompleted(false);
 
@@ -444,11 +463,11 @@ export default function MelodyMode({
         </div>
       ) : (
         <MelodyMeasureCard
+          ref={rollRef}
           measureLabel={measureLabel}
           targetXml={targetXml}
           measureNotes={measureNotesRelative}
           measureDuration={measureDuration}
-          pitchLine={pitchLine}
           noteGrades={activeGrades}
           isRecording={phase === "recording"}
         />

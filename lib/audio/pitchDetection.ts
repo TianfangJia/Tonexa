@@ -20,13 +20,20 @@ export type PitchCallback = (sample: PitchSample | null) => void;
  *
  * Returns a cleanup function that disconnects the processor.
  */
-const SMOOTH_ALPHA = 0.25;
+// Higher alpha = less smoothing = snappier response, more vibrato wobble.
+// 0.25 (old value) gave a ~4-frame tau (~170 ms lag) which made the pitch
+// line feel laggy. 0.75 cuts that to ~1-frame tau (~40 ms) with jitter
+// that is still within our grading tolerance (±1 semitone).
+const SMOOTH_ALPHA = 0.75;
 
 export function startPitchDetection(
   audioContext: AudioContext,
   sourceNode: MediaStreamAudioSourceNode,
   onPitch: PitchCallback,
-  bufferSize: number = 2048
+  // 1024 samples ≈ 21 ms frame at 48 kHz — half the latency of 2048 with
+  // no meaningful pitch-accuracy loss for vocal range (≥ 2 periods of
+  // 100 Hz fit in a 1024-sample buffer).
+  bufferSize: number = 1024
 ): () => void {
   const detector = PitchDetector.forFloat32Array(bufferSize);
   const inputBuffer = new Float32Array(bufferSize);

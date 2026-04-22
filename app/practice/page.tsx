@@ -395,7 +395,7 @@ export default function PracticePage() {
         )}
 
         {/* ── Drag handle ───────────────────────────────── */}
-        {mode !== 2 && mode !== 3 && (
+        {mode !== 2 && mode !== 3 && mode !== 4 && (
           <div
             className="flex h-3 cursor-row-resize items-center justify-center bg-zinc-50 hover:bg-zinc-100 border-b border-zinc-100 flex-shrink-0 select-none"
             onMouseDown={(e) => {
@@ -406,8 +406,8 @@ export default function PracticePage() {
           </div>
         )}
 
-        {/* ── Piano roll (hidden in Rhythm mode and Melody drill mode) ───── */}
-        {mode !== 2 && mode !== 3 && (
+        {/* ── Piano roll (hidden in Rhythm, Melody drill, and Ready modes) ─ */}
+        {mode !== 2 && mode !== 3 && mode !== 4 && (
           <section className="px-4 py-2 flex-shrink-0">
             <div style={{ height: rollHeight }}>
               <PianoRoll
@@ -453,7 +453,6 @@ export default function PracticePage() {
             <MelodyReadyMode
               melody={activeMelody!}
               scoreRef={scoreRef}
-              onSungNote={handleSungNote}
               onComplete={(pct, summary) => handleModeComplete(4, pct, summary)}
               sessionId={sessionId}
             />
@@ -461,7 +460,7 @@ export default function PracticePage() {
         </section>
       </div>
 
-      {celebrationScore !== null && mode !== 2 && (
+      {celebrationScore !== null && mode !== 2 && mode !== 3 && mode !== 4 && (
         // Placeholder overlay for non-rhythm modes — final positioning for
         // each mode will be adjusted in the mode's own layout later.
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">

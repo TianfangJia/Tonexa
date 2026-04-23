@@ -8,7 +8,6 @@
 
 import { PitchDetector } from "pitchy";
 import { PITCH_CLARITY_THRESHOLD } from "@/types/scoring";
-import { debugLog } from "@/components/ui/DebugHUD";
 
 export interface PitchSample {
   frequencyHz: number;
@@ -50,18 +49,12 @@ export function startPitchDetection(
 
   const MIN_RMS = 0.005; // reject background noise and piano echo through speakers
 
-  let loggedFirstPitch = false;
-  let loggedFirstSilence = false;
   const processFrame = () => {
     let sumSq = 0;
     for (let i = 0; i < bufferSize; i++) sumSq += inputBuffer[i] * inputBuffer[i];
     const rms = Math.sqrt(sumSq / bufferSize);
 
     if (rms < MIN_RMS) {
-      if (!loggedFirstSilence) {
-        debugLog(`pitch: first silent frame rms=${rms.toFixed(5)}`);
-        loggedFirstSilence = true;
-      }
       smoothedHz = 0;
       onPitch(null);
       return;
@@ -73,10 +66,6 @@ export function startPitchDetection(
       smoothedHz = smoothedHz > 0
         ? SMOOTH_ALPHA * pitch + (1 - SMOOTH_ALPHA) * smoothedHz
         : pitch;
-      if (!loggedFirstPitch) {
-        debugLog(`pitch: first voiced frame rms=${rms.toFixed(3)} hz=${pitch.toFixed(1)}`);
-        loggedFirstPitch = true;
-      }
       onPitch({ frequencyHz: smoothedHz, clarity, timestampSec: audioContext.currentTime });
     } else {
       smoothedHz = 0;
@@ -86,28 +75,18 @@ export function startPitchDetection(
 
   let stopped = false;
   let cleanup: () => void = () => {};
-  let frameCount = 0;
-  let chunkCount = 0;
-
-  debugLog(`pitch: startPitchDetection called ctxState=${audioContext.state}`);
 
   (async () => {
     try {
       if (!audioContext.audioWorklet) throw new Error("AudioWorklet unsupported");
       if (!workletRegistered.has(audioContext)) {
-        debugLog("pitch: addModule(/pitch-worklet.js) …");
         await audioContext.audioWorklet.addModule("/pitch-worklet.js");
         workletRegistered.add(audioContext);
-        debugLog("pitch: worklet module loaded");
       }
-      if (stopped) { debugLog("pitch: stopped before node create"); return; }
+      if (stopped) return;
 
       const node = new AudioWorkletNode(audioContext, "pitch-worklet");
-      debugLog("pitch: AudioWorkletNode created");
       node.port.onmessage = (ev: MessageEvent<Float32Array>) => {
-        chunkCount++;
-        if (chunkCount === 1)      debugLog("pitch: first chunk arrived");
-        else if (chunkCount === 50) debugLog(`pitch: 50 chunks, ${frameCount} frames so far`);
         const chunk = ev.data;
         let off = 0;
         while (off < chunk.length) {
@@ -117,8 +96,6 @@ export function startPitchDetection(
           off += n;
           if (bufferFill === bufferSize) {
             processFrame();
-            frameCount++;
-            if (frameCount === 1) debugLog("pitch: first frame processed");
             bufferFill = 0;
           }
         }
@@ -136,18 +113,12 @@ export function startPitchDetection(
         node.port.onmessage = null;
       };
     } catch (err) {
-      debugLog(`pitch: worklet init FAILED, falling back — ${err}`);
       // eslint-disable-next-line no-console
       console.warn("[pitchDetection] AudioWorklet init failed, falling back:", err);
       if (stopped) return;
 
       const processor = audioContext.createScriptProcessor(bufferSize, 1, 1);
-      debugLog("pitch: ScriptProcessor created (fallback)");
-      let scpCount = 0;
       processor.onaudioprocess = (event) => {
-        scpCount++;
-        if (scpCount === 1)       debugLog("pitch: ScriptProcessor first callback");
-        else if (scpCount === 20) debugLog(`pitch: ScriptProcessor 20 callbacks`);
         event.inputBuffer.copyFromChannel(inputBuffer, 0);
         processFrame();
       };

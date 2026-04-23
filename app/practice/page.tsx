@@ -29,7 +29,6 @@ import TranspositionSelector from "@/components/ui/TranspositionSelector";
 import TempoSlider from "@/components/ui/TempoSlider";
 import Celebration from "@/components/ui/Celebration";
 import TonalWarmup from "@/components/ui/TonalWarmup";
-import DebugHUD from "@/components/ui/DebugHUD";
 import { playNote, stopPiano } from "@/lib/playback/piano";
 import PianoRoll from "@/components/piano-roll/PianoRoll";
 import ScoreRenderer from "@/components/score/ScoreRenderer";
@@ -608,7 +607,6 @@ export default function PracticePage() {
           </div>
         </div>
       )}
-      <DebugHUD />
     </main>
   );
 }

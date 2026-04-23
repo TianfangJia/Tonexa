@@ -15,11 +15,17 @@ export interface MicrophoneHandle {
 export async function openMicrophone(
   fftSize: number = 2048
 ): Promise<MicrophoneHandle> {
+  // iOS/iPadOS mics run very quiet when all processing is disabled — the raw
+  // signal often sits below the RMS gate in pitchDetection.ts and every frame
+  // gets rejected as silence. Let the browser apply automatic gain control
+  // on iOS so the student's voice actually crosses the threshold.
+  const isIOS = typeof navigator !== "undefined" &&
+    /iPad|iPhone|iPod/.test(navigator.userAgent);
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: {
       echoCancellation: false,
       noiseSuppression: false,
-      autoGainControl: false,
+      autoGainControl: isIOS,
     },
     video: false,
   });

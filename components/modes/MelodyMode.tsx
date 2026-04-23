@@ -354,7 +354,16 @@ export default function MelodyMode({
       }
     }
 
-    if (curPhase === "evaluating" && beat === 0) evaluateMeasure();
+    if (curPhase === "evaluating" && beat === 0) {
+      // Hold pitch detection open for ~1 beat past the end of the measure
+      // before evaluating. Without this, a final 16th note sung on the last
+      // beat gets cut off by the microphone capture latency (~20 ms) + any
+      // student delay and never makes it into `pitchLineRef`. The per-note
+      // window in evaluateMeasure already tolerates ±150 ms, but only if
+      // the samples were actually captured first.
+      const tailMs = Math.min(300, beatDurationSec * 1000);
+      setTimeout(() => evaluateMeasure(), tailMs);
+    }
 
     if (curPhase === "prepCount") setCountdownNum(P - beat);
     else if (curPhase !== "idle") setCountdownNum(null);
@@ -409,13 +418,23 @@ export default function MelodyMode({
     setNoteGradesForMeasure(null);
     setCompleted(false);
 
+    // Open the microphone BEFORE the metronome/playback starts. iOS only
+    // routes Web Audio output to the speakers once the audio session is in
+    // PlayAndRecord mode, which requires an active mic stream. Without
+    // this, the first measure's metronome + playback are silent on
+    // iPad/iPhone until recording begins and flips the session category.
+    if (!micHandleRef.current) {
+      const handle = await startMic();
+      if (handle) micHandleRef.current = handle;
+    }
+
     const stop = await startMetronome({
       tempo:           melody.tempo,
       beatsPerMeasure: P,
       onBeat:          handleBeat,
     });
     stopMetronomeRef.current = stop;
-  }, [melody.tempo, P, handleBeat, updateMeasureIdx]);
+  }, [melody.tempo, P, handleBeat, updateMeasureIdx, startMic]);
 
   const pauseDrill = useCallback(() => {
     stopMetronomeRef.current?.();

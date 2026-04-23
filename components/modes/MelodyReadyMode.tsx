@@ -243,16 +243,38 @@ export default function MelodyReadyMode({
     if (!handle) { setPhase("idle"); return; }
     micHandleRef.current = handle;
 
-    // MediaRecorder for the raw-audio upload at the end.
-    const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-      ? "audio/webm;codecs=opus"
-      : "audio/ogg;codecs=opus";
-    const recorder = new MediaRecorder(handle.stream, { mimeType });
-    recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) audioChunksRef.current.push(e.data);
-    };
-    recorder.start(200);
-    mediaRecorderRef.current = recorder;
+    // MediaRecorder for the raw-audio upload at the end. Chrome/Firefox prefer
+    // webm/ogg Opus; Safari only supports mp4/mpeg — pick the first candidate
+    // the browser actually supports. If none match (very old browsers or no
+    // MediaRecorder at all), skip the recorder entirely so the student can
+    // still practice even without an upload.
+    try {
+      if (typeof MediaRecorder !== "undefined") {
+        const candidates = [
+          "audio/webm;codecs=opus",
+          "audio/webm",
+          "audio/ogg;codecs=opus",
+          "audio/mp4;codecs=mp4a.40.2",
+          "audio/mp4",
+          "audio/mpeg",
+        ];
+        const mimeType = candidates.find((t) => MediaRecorder.isTypeSupported(t));
+        if (mimeType) {
+          const recorder = new MediaRecorder(handle.stream, { mimeType });
+          recorder.ondataavailable = (e) => {
+            if (e.data.size > 0) audioChunksRef.current.push(e.data);
+          };
+          recorder.start(200);
+          mediaRecorderRef.current = recorder;
+        } else {
+          // eslint-disable-next-line no-console
+          console.warn("[MelodyReadyMode] no supported MediaRecorder mimeType; recording disabled.");
+        }
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn("[MelodyReadyMode] MediaRecorder init failed:", err);
+    }
 
     setPhase("countdown");
     // On every countdown beat: play the first-note pitch alongside the

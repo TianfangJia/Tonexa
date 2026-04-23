@@ -3,10 +3,11 @@
 import type { PracticeMode } from "@/types/session";
 
 const MODES: { id: PracticeMode; label: string; desc: string }[] = [
-  { id: 1, label: "Pitch",   desc: "Match each note" },
-  { id: 2, label: "Rhythm",  desc: "Clap the beats" },
-  { id: 3, label: "Melody",  desc: "Measure by measure" },
-  { id: 4, label: "Full",    desc: "Sing it through" },
+  { id: 0, label: "Overview", desc: "Prep & explore" },
+  { id: 1, label: "Pitch",    desc: "Match each note" },
+  { id: 2, label: "Rhythm",   desc: "Clap the beats" },
+  { id: 3, label: "Melody",   desc: "Measure by measure" },
+  { id: 4, label: "Full",     desc: "Sing it through" },
 ];
 
 interface Props {

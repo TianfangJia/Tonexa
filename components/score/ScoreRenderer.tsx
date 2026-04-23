@@ -39,6 +39,14 @@ interface Props {
   /** Enables click/drag-to-seek. Fires with the melody.notes index nearest
    *  the pointer. Drag is tracked while the mouse button is held down. */
   onSeek?: (noteIndex: number) => void;
+  /** Verovio `spacingSystem` override — vertical gap between systems, in
+   *  Verovio units. Default 6 (moderate). Lower values compress multi-line
+   *  scores (useful for pitch mode where each measure holds one whole note). */
+  spacingSystem?: number;
+  /** Verovio `justificationSystem` override. Default 1.0 (stretch each
+   *  system to full width). Pass 0 to leave the system at its natural width
+   *  — useful for short scores that would otherwise look oversized. */
+  justificationSystem?: number;
 }
 
 // Singleton: load Verovio once and reuse across component instances.
@@ -123,7 +131,7 @@ function insertSystemBreaks(musicXml: string, breakpoints: number[]): string {
 }
 
 const ScoreRenderer = forwardRef<ScoreRendererHandle, Props>(
-  ({ musicXml, className, onContentHeightChange, onSeek }, ref) => {
+  ({ musicXml, className, onContentHeightChange, onSeek, spacingSystem, justificationSystem }, ref) => {
     const wrapperRef    = useRef<HTMLDivElement>(null);
     const svgRef        = useRef<HTMLDivElement>(null);
     const overlayRef    = useRef<HTMLDivElement | null>(null);
@@ -252,9 +260,9 @@ const ScoreRenderer = forwardRef<ScoreRendererHandle, Props>(
             // Justify every system to the full pageWidth — including the last
             // (shorter) system in a 3+3+2 split. Default min is 0.8 which would
             // leave a short last line unjustified.
-            justificationSystem: 1.0,
+            justificationSystem: justificationSystem ?? 1.0,
             minLastJustification: 0,
-            spacingSystem: 6,
+            spacingSystem: spacingSystem ?? 6,
             spacingLinear: 0.25,
             spacingNonLinear: 0.5,
             pageMarginLeft: 20,
@@ -334,7 +342,7 @@ const ScoreRenderer = forwardRef<ScoreRendererHandle, Props>(
       })();
 
       return () => { cancelled = true; };
-    }, [musicXml, containerWidth]);
+    }, [musicXml, containerWidth, spacingSystem, justificationSystem]);
 
     // ── Cursor helpers ──────────────────────────────────────────────────────
     // The cursor is drawn as an SVG <line> inside the rendered score SVG itself.

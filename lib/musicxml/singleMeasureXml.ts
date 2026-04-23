@@ -158,10 +158,14 @@ function noteXml(
     tiedXml += `<tied type="stop"/>`;
   }
   const notationsXml = tiedXml ? `<notations>${tiedXml}</notations>` : "";
+  // B4 sits on the middle line, so Verovio's default stem-direction flips
+  // between up/down across beat groups. Force stems down on B4 so rhythm-mode
+  // notation reads uniform (matches extractRhythmXML's behaviour).
+  const stemXml = midi === 71 ? `<stem>down</stem>` : "";
   return `      <note>` +
          pitchXmlForMidi(midi) +
          `<duration>${d}</duration>${tieXml}` +
-         `<voice>1</voice><type>${type}</type>${dotXml}${beams}${notationsXml}` +
+         `<voice>1</voice><type>${type}</type>${dotXml}${stemXml}${beams}${notationsXml}` +
          `</note>`;
 }
 

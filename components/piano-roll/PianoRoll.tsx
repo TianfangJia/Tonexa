@@ -27,18 +27,23 @@ interface Props {
   livePitchMidi?: number | null;
   currentNoteIndex?: number;
   scrollVersion?: number;
+  /** Lowest MIDI shown on the roll (default 36 = C2). */
+  midiMin?: number;
+  /** Highest MIDI shown on the roll (default 84 = C6). */
+  midiMax?: number;
   className?: string;
 }
 
-const MIDI_MIN = 36; // C2 — extended for male voice range
-const MIDI_MAX = 84; // C6
-const MIDI_RANGE = MIDI_MAX - MIDI_MIN;
+const DEFAULT_MIDI_MIN = 36; // C2 — extended for male voice range
+const DEFAULT_MIDI_MAX = 84; // C6
 const NOTE_HEIGHT = 10;
 const PIANO_KEY_WIDTH = 28;
 const LABEL_NOTES = ["C", "E", "G", "B"];
 // Lead-in space before note 0 so the first note can sit to the right of the cursor.
-// Must be > (maxContainerWidth - PIANO_KEY_WIDTH) / 3 + CURSOR_GAP ≈ 500 covers up to ~1450px wide.
-const LEAD_IN_PX = 500;
+// Must be ≥ (maxContainerWidth - PIANO_KEY_WIDTH) / 3 + CURSOR_GAP — otherwise
+// scrollLeft clamps at 0 and the cursor drifts right of the first note.
+// 900 covers viewports up to ~2728 px wide (effectiveW/3 ≈ 900).
+const LEAD_IN_PX = 900;
 const CURSOR_GAP = 0; // px between cursor line and current note's left edge
 
 const GRADE_COLORS: Record<NoteGrade, string> = {
@@ -53,10 +58,6 @@ const NOTE_NAMES_12 = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
 
 function noteNameFromMidi(midi: number): string {
   return NOTE_NAMES_12[midi % 12];
-}
-
-function midiToY(midi: number): number {
-  return (MIDI_MAX - midi) * NOTE_HEIGHT;
 }
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
@@ -75,10 +76,19 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
 
 export default function PianoRoll({
   targetNotes, sungNotes, currentSec, totalSec,
-  pxPerSec = 80, livePitchMidi, currentNoteIndex, scrollVersion, className,
+  pxPerSec = 80, livePitchMidi, currentNoteIndex, scrollVersion,
+  midiMin: midiMinProp, midiMax: midiMaxProp, className,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const MIDI_MIN = midiMinProp ?? DEFAULT_MIDI_MIN;
+  const MIDI_MAX = midiMaxProp ?? DEFAULT_MIDI_MAX;
+  const MIDI_RANGE = MIDI_MAX - MIDI_MIN;
+  const midiToY = useCallback(
+    (midi: number) => (MIDI_MAX - midi) * NOTE_HEIGHT,
+    [MIDI_MAX],
+  );
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -265,14 +275,20 @@ export default function PianoRoll({
 
   useEffect(() => { scrollToCurrent(); }, [scrollToCurrent, scrollVersion]);
 
-  // Re-scroll when the container is resized (e.g. window resize, layout shift)
+  // Re-scroll when the container is resized (e.g. window resize, layout shift).
+  // Also nudges a re-draw — the cursor line position depends on
+  // container.clientWidth, and if scrollTo lands on the same scrollLeft no
+  // scroll event fires to trigger a redraw on its own.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const ro = new ResizeObserver(() => scrollToCurrent(false));
+    const ro = new ResizeObserver(() => {
+      scrollToCurrent(false);
+      draw();
+    });
     ro.observe(container);
     return () => ro.disconnect();
-  }, [scrollToCurrent]);
+  }, [scrollToCurrent, draw]);
 
   // Redraw on scroll so the sticky keyboard tracks new scrollLeft
   useEffect(() => {
@@ -295,19 +311,33 @@ export default function PianoRoll({
     }
   }, [currentSec, pxPerSec, currentNoteIndex]);
 
-  // Resize canvas to fit full melody width, scaled for device pixel ratio
+  // Resize canvas to fit full melody width, scaled for device pixel ratio.
+  // The trailing padding is a full container width so that the last target
+  // note can still be scrolled into the cursor-line (1/3 of viewport) position
+  // — without it, scroll is clamped and the final few notes stop advancing.
+  // A ResizeObserver re-runs this when the container width changes so the
+  // canvas stays correctly sized on viewport resize.
   useEffect(() => {
     const container = containerRef.current;
     const canvas = canvasRef.current;
     if (!container || !canvas) return;
-    const dpr = window.devicePixelRatio || 1;
-    const logicalH = (MIDI_RANGE + 1) * NOTE_HEIGHT;
-    const logicalW = Math.max(container.clientWidth, PIANO_KEY_WIDTH + LEAD_IN_PX + totalSec * pxPerSec + 80);
-    canvas.width = logicalW * dpr;
-    canvas.height = logicalH * dpr;
-    canvas.style.width = `${logicalW}px`;
-    canvas.style.height = `${logicalH}px`;
-    draw();
+
+    const applySize = () => {
+      const dpr = window.devicePixelRatio || 1;
+      const logicalH = (MIDI_RANGE + 1) * NOTE_HEIGHT;
+      const contentW = PIANO_KEY_WIDTH + LEAD_IN_PX + totalSec * pxPerSec;
+      const logicalW = Math.max(container.clientWidth, contentW + container.clientWidth);
+      canvas.width = logicalW * dpr;
+      canvas.height = logicalH * dpr;
+      canvas.style.width = `${logicalW}px`;
+      canvas.style.height = `${logicalH}px`;
+      draw();
+    };
+
+    applySize();
+    const ro = new ResizeObserver(applySize);
+    ro.observe(container);
+    return () => ro.disconnect();
   }, [totalSec, pxPerSec, draw]);
 
   useEffect(() => { draw(); }, [draw]);

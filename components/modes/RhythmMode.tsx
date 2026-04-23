@@ -583,7 +583,7 @@ export default function RhythmMode({
         ) : (
         <>
         <div className="mb-3 flex items-center justify-between">
-          <p className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+          <p className="text-base font-semibold uppercase tracking-wide text-zinc-500">
             Measure by Measure Practice — M{currentMeasureNum} ({measureIdx + 1}/{totalMeasures})
           </p>
           <div className="flex items-center gap-2">

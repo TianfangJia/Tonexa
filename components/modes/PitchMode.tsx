@@ -53,11 +53,12 @@ interface Props {
   onLivePitch?: (midi: number | null, atSec: number) => void;
   onNoteAdvance?: (newIndex: number) => void;
   onRestart?: () => void;
+  onNext?: () => void;
   sessionId: string;
 }
 
 export default function PitchMode({
-  melody, scoreRef, onSungNote, onComplete, onLivePitch, onNoteAdvance, onRestart,
+  melody, scoreRef, onSungNote, onComplete, onLivePitch, onNoteAdvance, onRestart, onNext,
 }: Props) {
   // Deduplicate consecutive same pitches (B B A A → B A)
   const pitchNotes = useMemo(() => {
@@ -297,10 +298,18 @@ export default function PitchMode({
         <p className="text-zinc-500">
           {passCount} / {pitchNotes.length} notes passed
         </p>
-        <button onClick={handleRestart}
-          className="rounded-xl bg-indigo-600 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 active:scale-95 transition-all">
-          Restart
-        </button>
+        <div className="flex gap-3">
+          <button onClick={handleRestart}
+            className="rounded-xl bg-zinc-200 px-6 py-3 text-sm font-semibold text-zinc-700 hover:bg-zinc-300 active:scale-95 transition-all">
+            Restart
+          </button>
+          {onNext && (
+            <button onClick={onNext}
+              className="rounded-xl bg-indigo-600 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 active:scale-95 transition-all">
+              Next
+            </button>
+          )}
+        </div>
       </div>
     );
   }

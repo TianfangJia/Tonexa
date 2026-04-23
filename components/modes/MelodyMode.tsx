@@ -104,6 +104,17 @@ export default function MelodyMode({
     [noteGradesForMeasure, rollIdx],
   );
 
+  // Target score colours are keyed to `measureIdx` — the score jumps ahead
+  // to the next measure on a pass while the roll stays behind, so the grades
+  // should only paint noteheads when they belong to the measure currently
+  // drawn on the staff.
+  const scoreGrades = useMemo(
+    () => noteGradesForMeasure?.idx === measureIdx
+      ? noteGradesForMeasure.grades
+      : new Map<number, MeasureGrade>(),
+    [noteGradesForMeasure, measureIdx],
+  );
+
   // ── Derived ──────────────────────────────────────────────────────────────
   const P               = melody.beatsPerMeasure;
   const beatDurationSec = 60 / melody.tempo;
@@ -284,13 +295,12 @@ export default function MelodyMode({
         setCompleted(true);
         onComplete((newPassed / totalMeasures) * 100);
       } else {
-        // Advance the TARGET score immediately so the student can read the
-        // next measure during the playback/prepCount intermission. The
-        // piano roll stays on the measure they just sang (with grades
-        // still coloured) — `pendingNextIdxRef` holds the roll's next
-        // index and is applied on the last beat of prepCount.
-        measureIdxRef.current = nextIdx;
-        updateMeasureIdx(nextIdx);
+        // Hold both the target score and the piano roll on the measure the
+        // student just sang while the 4-beat evaluating intermission plays
+        // out — they both carry the colour grades during this window.
+        // `pendingNextIdxRef` is applied to the target score on the next
+        // playback beat (after the 4-beat wait) and to the piano roll one
+        // phase later at prepCount beat 0.
         pendingNextIdxRef.current = nextIdx;
       }
     } else {
@@ -327,7 +337,18 @@ export default function MelodyMode({
 
     if (beat === 0) {
       switch (curPhase) {
-        case "playback":  schedulePlayback(audioTime); break;
+        case "playback":
+          // 4-beat evaluating intermission is over — advance the target
+          // score to the next measure (if one is pending) right before we
+          // play it. The piano roll continues to lag by another 4 beats
+          // and flips at prepCount beat 0.
+          if (pendingNextIdxRef.current !== null) {
+            const nextIdx = pendingNextIdxRef.current;
+            measureIdxRef.current = nextIdx;
+            updateMeasureIdx(nextIdx);
+          }
+          schedulePlayback(audioTime);
+          break;
         case "prepCount": setResultMsg(null);          break;
         case "recording": void beginRecording();       break;
       }
@@ -469,6 +490,7 @@ export default function MelodyMode({
           measureNotes={measureNotesRelative}
           measureDuration={measureDuration}
           noteGrades={activeGrades}
+          scoreGrades={scoreGrades}
           isRecording={phase === "recording"}
         />
       )}

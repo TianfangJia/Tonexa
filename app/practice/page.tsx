@@ -1,7 +1,7 @@
 "use client";
 // ── Main Practice Page ─────────────────────────────────────────────────────
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 
@@ -20,12 +20,14 @@ import {
   transposeXML,
   scaleMelodyTempo,
 } from "@/lib/musicxml/transposer";
+import { buildPitchOnlyMelody, buildPitchOnlyXml, extractFifths } from "@/lib/musicxml/pitchOnly";
 import { upsertResult } from "@/lib/db/results";
 
 import ModeSelector from "@/components/ui/ModeSelector";
 import TranspositionSelector from "@/components/ui/TranspositionSelector";
 import TempoSlider from "@/components/ui/TempoSlider";
 import Celebration from "@/components/ui/Celebration";
+import TonalWarmup from "@/components/ui/TonalWarmup";
 import { playNote, stopPiano } from "@/lib/playback/piano";
 import PianoRoll from "@/components/piano-roll/PianoRoll";
 import ScoreRenderer from "@/components/score/ScoreRenderer";
@@ -50,7 +52,7 @@ export default function PracticePage() {
   const [transposedMelody, setTransposedMelody] = useState<ParsedMelody | null>(null);
   const [transposedXML, setTransposedXML] = useState<string>("");
   const [transposition, setTransposition] = useState<TranspositionKey>("C");
-  const [mode, setMode] = useState<PracticeMode>(1);
+  const [mode, setMode] = useState<PracticeMode>(0);
   const [baseTempo, setBaseTempo] = useState(60);
   // Default practice tempo = 84 BPM (middle preset). Overrides any tempo
   // that happens to be stored in the loaded melody's XML.
@@ -206,17 +208,38 @@ export default function PracticePage() {
   const handleModeComplete = useCallback(
     async (modeNum: PracticeMode, scorePct: number, details?: PerformanceSummary) => {
       // Rhythm (mode 2) owns its own inline celebration — don't double-fire
-      // the page-level overlay on top of it.
-      if (modeNum !== 2) setCelebrationScore(scorePct);
+      // the page-level overlay on top of it. Pitch (mode 1) shows its own
+      // completion screen inline, so it also skips the page-level overlay.
+      if (modeNum !== 1 && modeNum !== 2) setCelebrationScore(scorePct);
       if (!sessionId) return;
       await upsertResult(sessionId, modeNum, true, scorePct, (details as unknown as Record<string, unknown>) ?? {});
     },
     [sessionId]
   );
 
-  const activeMelody = mode >= 2 && transposedMelody
-    ? scaleMelodyTempo(transposedMelody, currentTempo)
-    : transposedMelody;
+  // Pitch-only (mode 1): strip rhythm so every distinct pitch renders as one
+  // whole-measure note. Derived from the transposed melody + XML so key/time
+  // signature follow the student's current key selection.
+  const pitchOnlyMelody = useMemo(
+    () => (transposedMelody ? buildPitchOnlyMelody(transposedMelody) : null),
+    [transposedMelody],
+  );
+  const pitchOnlyXML = useMemo(() => {
+    if (!pitchOnlyMelody || !transposedMelody) return "";
+    const fifths = extractFifths(transposedXML);
+    return buildPitchOnlyXml(
+      pitchOnlyMelody.notes.map((n) => n.midi),
+      transposedMelody.beatsPerMeasure,
+      transposedMelody.beatUnit,
+      fifths,
+    );
+  }, [pitchOnlyMelody, transposedMelody, transposedXML]);
+
+  const activeMelody = mode === 1
+    ? pitchOnlyMelody
+    : (mode === 0 || mode >= 2) && transposedMelody
+      ? scaleMelodyTempo(transposedMelody, currentTempo)
+      : transposedMelody;
 
   const stopPlayAll = useCallback(() => {
     playAllActiveRef.current = false;
@@ -321,7 +344,7 @@ export default function PracticePage() {
         {/* ── Mode selector + tempo (above the score) ── */}
         <section className="flex flex-col gap-2 border-b border-zinc-100 px-4 py-3 flex-shrink-0">
           <ModeSelector current={mode} onChange={setMode} />
-          {mode >= 2 && (
+          {(mode === 0 || mode >= 2) && (
             // Two-column grid: tempo on the left, key on the right.
             // `items-center` aligns them to a shared invisible horizontal
             // midline — the slider's track lines up with the Key select.
@@ -332,13 +355,16 @@ export default function PracticePage() {
                 value={currentTempo}
                 onChange={setCurrentTempo}
               />
-              {/* Melody modes expose key selection inline next to tempo —
-                  rhythm has no pitch so the selector stays hidden there. */}
-              {mode >= 3 ? (
-                <TranspositionSelector
-                  value={transposition}
-                  onChange={handleTranspositionChange}
-                />
+              {/* Overview + melody modes expose key selection inline next to
+                  tempo — rhythm has no pitch so the selector stays hidden there.
+                  Key selector is centered within its grid cell. */}
+              {mode === 0 || mode >= 3 ? (
+                <div className="flex justify-center">
+                  <TranspositionSelector
+                    value={transposition}
+                    onChange={handleTranspositionChange}
+                  />
+                </div>
               ) : (
                 <span />
               )}
@@ -348,7 +374,34 @@ export default function PracticePage() {
 
         {/* ── Score area (hidden in Rhythm mode — it renders its own) ── */}
         {mode !== 2 && (
-          <section className="relative border-b border-zinc-100 px-4 py-2 overflow-hidden flex-shrink-0" style={{ height: scoreHeight }}>
+          <section
+            className={`relative overflow-hidden flex-shrink-0 ${
+              mode === 0
+                ? "mx-4 mt-3 rounded-2xl border border-zinc-200 bg-white px-4 py-2"
+                : "border-b border-zinc-100 px-4 py-2"
+            }`}
+            style={{ height: scoreHeight + (mode === 1 ? 48 : 0) }}
+          >
+            {/* Overview: assignment title label in the top-left. Uses the
+                loaded melody record's title verbatim. */}
+            {mode === 0 && melodyRecord && (
+              <div className="absolute left-4 top-3 z-10">
+                <p className="text-base font-semibold uppercase tracking-wide text-zinc-500">
+                  {melodyRecord.title}
+                </p>
+              </div>
+            )}
+            {/* Pitch mode: key selector sits top-left of the score window.
+                Pushes the score downward via the ScoreRenderer's top padding
+                (see `pt-12` below) so it doesn't overlap the staff. */}
+            {mode === 1 && (
+              <div className="absolute left-4 top-2 z-10">
+                <TranspositionSelector
+                  value={transposition}
+                  onChange={handleTranspositionChange}
+                />
+              </div>
+            )}
             {/* Full-piece play/pause button — matches rhythm-mode's
                 placement (top-right of the score container). */}
             <button
@@ -371,9 +424,10 @@ export default function PracticePage() {
             </button>
             <ScoreRenderer
               ref={scoreRef}
-              musicXml={transposedXML}
-              className="h-full overflow-y-auto"
+              musicXml={mode === 1 ? pitchOnlyXML : transposedXML}
+              className={`h-full overflow-y-auto ${mode === 1 ? "pt-12" : ""}`}
               onContentHeightChange={(h) => setScoreHeight(h + 16)}
+              spacingSystem={mode === 1 ? 2 : undefined}
             />
           </section>
         )}
@@ -395,7 +449,7 @@ export default function PracticePage() {
         )}
 
         {/* ── Drag handle ───────────────────────────────── */}
-        {mode !== 2 && mode !== 3 && mode !== 4 && (
+        {mode === 1 && (
           <div
             className="flex h-3 cursor-row-resize items-center justify-center bg-zinc-50 hover:bg-zinc-100 border-b border-zinc-100 flex-shrink-0 select-none"
             onMouseDown={(e) => {
@@ -406,8 +460,8 @@ export default function PracticePage() {
           </div>
         )}
 
-        {/* ── Piano roll (hidden in Rhythm, Melody drill, and Ready modes) ─ */}
-        {mode !== 2 && mode !== 3 && mode !== 4 && (
+        {/* ── Piano roll (Pitch mode only). ─ */}
+        {mode === 1 && (
           <section className="px-4 py-2 flex-shrink-0">
             <div style={{ height: rollHeight }}>
               <PianoRoll
@@ -415,7 +469,9 @@ export default function PracticePage() {
                 sungNotes={sungNotes}
                 currentSec={currentSec}
                 totalSec={totalSec}
-                pxPerSec={80}
+                pxPerSec={mode === 1 ? 30 : 80}
+                midiMin={mode === 1 ? 43 : undefined}
+                midiMax={mode === 1 ? 84 : undefined}
                 livePitchMidi={(mode === 1 || mode === 4) ? livePitchMidi : null}
                 currentNoteIndex={mode === 1 ? pitchNoteIndex : undefined}
                 scrollVersion={mode === 1 ? pitchScrollVersion : undefined}
@@ -426,16 +482,46 @@ export default function PracticePage() {
         )}
 
         {/* ── Active mode panel ─────────────────────────── */}
-        <section className="flex-1 overflow-y-auto px-4 py-3 pb-8">
-          {mode === 1 && (
+        <section className={`flex-1 overflow-y-auto px-4 pb-8 ${mode === 0 ? "pt-6" : "py-3"}`}>
+          {mode === 0 && (
+            <div className="flex flex-col gap-4">
+              <div className="grid grid-cols-2 gap-4">
+                <TonalWarmup musicKey={transposition} />
+                {/* Welcome / encouragement card on the right. Gives the
+                    student a quick sense of what the app does before they
+                    dive into a mode. */}
+                <div className="rounded-2xl border border-zinc-200 bg-gradient-to-br from-indigo-50 to-white p-5">
+                  <p className="text-base font-semibold uppercase tracking-wide text-zinc-500">
+                    Welcome to Tonexa
+                  </p>
+                  <p className="mt-2 text-sm leading-relaxed text-zinc-700">
+                    Tonexa guides you through four short steps — pitch, rhythm,
+                    measure-by-measure, then the full melody — so every piece
+                    feels approachable. Take your time with the tonal warmup on
+                    the left: let the key settle in your ear before you sing.
+                  </p>
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <button
+                  onClick={() => setMode(1)}
+                  className="rounded-xl bg-indigo-600 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 active:scale-95 transition-all"
+                >
+                  Start Practice →
+                </button>
+              </div>
+            </div>
+          )}
+          {mode === 1 && pitchOnlyMelody && (
             <PitchMode
-              melody={transposedMelody}
+              melody={pitchOnlyMelody}
               scoreRef={scoreRef}
               onSungNote={handleSungNote}
               onComplete={(pct) => handleModeComplete(1, pct)}
               onLivePitch={handleLivePitch}
               onNoteAdvance={setPitchNoteIndex}
               onRestart={() => { setSungNotes([]); setPitchScrollVersion((v) => v + 1); }}
+              onNext={() => setMode(2)}
               sessionId={sessionId ?? ""}
             />
           )}
@@ -460,7 +546,7 @@ export default function PracticePage() {
         </section>
       </div>
 
-      {celebrationScore !== null && mode !== 2 && mode !== 3 && mode !== 4 && (
+      {celebrationScore !== null && mode !== 0 && mode !== 1 && mode !== 2 && mode !== 3 && mode !== 4 && (
         // Placeholder overlay for non-rhythm modes — final positioning for
         // each mode will be adjusted in the mode's own layout later.
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">

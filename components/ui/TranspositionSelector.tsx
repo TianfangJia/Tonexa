@@ -10,7 +10,7 @@ interface Props {
 export default function TranspositionSelector({ value, onChange, disabled }: Props) {
   return (
     <div className="flex items-center gap-2">
-      <label className="text-xs font-medium text-zinc-500 whitespace-nowrap">Key</label>
+      <label className="text-xs font-medium text-zinc-500 whitespace-nowrap">Key / Transposition</label>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value as TranspositionKey)}
@@ -19,7 +19,7 @@ export default function TranspositionSelector({ value, onChange, disabled }: Pro
       >
         {TRANSPOSITION_KEYS.map((k) => (
           <option key={k} value={k}>
-            {k}
+            {k} major
           </option>
         ))}
       </select>

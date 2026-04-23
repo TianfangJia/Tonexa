@@ -15,5 +15,14 @@ export function extractRhythmXML(xmlText: string): string {
   result = result.replace(/<transpose>[\s\S]*?<\/transpose>/g, "");
   // Strip explicit accidental display elements (pitch is now B natural)
   result = result.replace(/<accidental[^>]*>[\s\S]*?<\/accidental>/g, "");
+  // B4 sits on the middle line — Verovio's default stem-direction heuristic
+  // flips between up and down across beat groups, which looks inconsistent.
+  // Force every pitched note's stem down so the notation reads uniform.
+  // Strip any existing <stem> first, then append a fresh one per note.
+  result = result.replace(/<stem[^>]*>[\s\S]*?<\/stem>/g, "");
+  result = result.replace(/<note>([\s\S]*?)<\/note>/g, (_, inner: string) => {
+    if (inner.includes("<rest")) return `<note>${inner}</note>`;
+    return `<note>${inner}<stem>down</stem></note>`;
+  });
   return result;
 }

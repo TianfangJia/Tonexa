@@ -30,15 +30,23 @@ export async function openMicrophone(
     (navigator.platform === "MacIntel" && (navigator.maxTouchPoints ?? 0) > 1)
   );
   debugLog(`mic: getUserMedia (isIOS=${isIOS})`);
+  // iOS quirk: disabling echoCancellation/noiseSuppression routes the mic
+  // through a low-gain capture path that returns effectively silent samples.
+  // Let Safari apply its defaults on iOS — non-iOS still gets the raw path
+  // so our pitch detection sees unprocessed signal.
+  const audioConstraints: MediaTrackConstraints = isIOS
+    ? { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+    : { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
   const stream = await navigator.mediaDevices.getUserMedia({
-    audio: {
-      echoCancellation: false,
-      noiseSuppression: false,
-      autoGainControl: isIOS,
-    },
+    audio: audioConstraints,
     video: false,
   });
-  debugLog(`mic: stream active=${stream.active} tracks=${stream.getTracks().length}`);
+  const track = stream.getAudioTracks()[0];
+  const settings = track?.getSettings?.() ?? {};
+  debugLog(
+    `mic: stream active=${stream.active} tracks=${stream.getTracks().length} ` +
+    `ec=${settings.echoCancellation} ns=${settings.noiseSuppression} agc=${settings.autoGainControl}`,
+  );
 
   // Reuse the shared native AudioContext (created via getSharedAudioContext,
   // installed into Tone on first use). One context per tab fixes iOS's

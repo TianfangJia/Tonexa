@@ -5,17 +5,14 @@ import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { fetchMelodies } from "@/lib/db/melodies";
 import { createStudent, createSession } from "@/lib/db/sessions";
-import type { MelodyRecord, TranspositionKey } from "@/types/music";
-import { TRANSPOSITION_KEYS } from "@/types/music";
+import type { MelodyRecord } from "@/types/music";
 import MelodySelector from "@/components/ui/MelodySelector";
-import TranspositionSelector from "@/components/ui/TranspositionSelector";
 
 export default function HomePage() {
   const router = useRouter();
   const [name, setName] = useState("");
   const [melodies, setMelodies] = useState<MelodyRecord[]>([]);
   const [selectedMelodyId, setSelectedMelodyId] = useState<string | null>(null);
-  const [transposition, setTransposition] = useState<TranspositionKey>("C");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,13 +29,15 @@ export default function HomePage() {
     setError(null);
     try {
       const student = await createStudent(name.trim());
-      const session = await createSession(student.id, selectedMelodyId, transposition);
+      // Transposition defaults to "C" on the session record. The practice
+      // page overrides this with the melody's own default key on load, and
+      // the student picks the final key later in Overview mode.
+      const session = await createSession(student.id, selectedMelodyId, "C");
       // Store in sessionStorage for the practice page
       sessionStorage.setItem("studentId", student.id);
       sessionStorage.setItem("studentName", student.name);
       sessionStorage.setItem("sessionId", session.id);
       sessionStorage.setItem("melodyId", selectedMelodyId);
-      sessionStorage.setItem("transposition", transposition);
       router.push("/practice");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");
@@ -53,6 +52,7 @@ export default function HomePage() {
         <div className="mb-10 text-center">
           <h1 className="text-2xl font-bold tracking-tight text-zinc-900">Tonexa</h1>
           <p className="mt-1 text-sm text-zinc-400">Singing practice with Tonexa</p>
+          <p className="mt-0.5 text-[10px] font-medium tracking-wide text-zinc-400">by Tianfang</p>
         </div>
 
         <form onSubmit={handleStart} className="flex flex-col gap-5">
@@ -76,9 +76,6 @@ export default function HomePage() {
             selectedId={selectedMelodyId}
             onChange={setSelectedMelodyId}
           />
-
-          {/* Transposition */}
-          <TranspositionSelector value={transposition} onChange={setTransposition} />
 
           {error && <p className="text-sm text-red-500">{error}</p>}
 

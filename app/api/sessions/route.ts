@@ -55,5 +55,8 @@ export async function GET() {
     recording: recordingMap[s.id] ?? null,
   }));
 
-  return NextResponse.json({ rows });
+  return NextResponse.json(
+    { rows },
+    { headers: { "Cache-Control": "no-store, must-revalidate" } },
+  );
 }

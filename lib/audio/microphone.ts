@@ -24,7 +24,18 @@ export async function openMicrophone(
     video: false,
   });
 
-  const audioContext = new AudioContext();
+  // Safari falls back to the webkit-prefixed constructor on older versions,
+  // and always creates the context in `suspended` state. Without an explicit
+  // `resume()`, the downstream ScriptProcessorNode never fires onaudioprocess
+  // — pitch detection looks frozen even though the mic light is on.
+  const AC: typeof AudioContext =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+  const audioContext = new AC();
+  if (audioContext.state === "suspended") {
+    try { await audioContext.resume(); } catch { /* non-fatal */ }
+  }
+
   const sourceNode = audioContext.createMediaStreamSource(stream);
   const analyserNode = audioContext.createAnalyser();
   analyserNode.fftSize = fftSize;

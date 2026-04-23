@@ -1,5 +1,7 @@
 // ── Microphone capture ─────────────────────────────────────────────────────
 
+import { debugLog } from "@/components/ui/DebugHUD";
+
 export interface MicrophoneHandle {
   audioContext: AudioContext;
   analyserNode: AnalyserNode;
@@ -21,6 +23,7 @@ export async function openMicrophone(
   // on iOS so the student's voice actually crosses the threshold.
   const isIOS = typeof navigator !== "undefined" &&
     /iPad|iPhone|iPod/.test(navigator.userAgent);
+  debugLog(`mic: getUserMedia (isIOS=${isIOS})`);
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: {
       echoCancellation: false,
@@ -29,6 +32,7 @@ export async function openMicrophone(
     },
     video: false,
   });
+  debugLog(`mic: stream active=${stream.active} tracks=${stream.getTracks().length}`);
 
   // Safari falls back to the webkit-prefixed constructor on older versions,
   // and always creates the context in `suspended` state. Without an explicit
@@ -38,8 +42,14 @@ export async function openMicrophone(
     window.AudioContext ||
     (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
   const audioContext = new AC();
+  debugLog(`mic: ctx created state=${audioContext.state} sr=${audioContext.sampleRate}`);
   if (audioContext.state === "suspended") {
-    try { await audioContext.resume(); } catch { /* non-fatal */ }
+    try {
+      await audioContext.resume();
+      debugLog(`mic: ctx resume() ok state=${audioContext.state}`);
+    } catch (e) {
+      debugLog(`mic: ctx resume FAILED ${e}`);
+    }
   }
 
   const sourceNode = audioContext.createMediaStreamSource(stream);

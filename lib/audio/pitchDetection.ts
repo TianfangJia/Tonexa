@@ -8,6 +8,7 @@
 
 import { PitchDetector } from "pitchy";
 import { PITCH_CLARITY_THRESHOLD } from "@/types/scoring";
+import { debugLog } from "@/components/ui/DebugHUD";
 
 export interface PitchSample {
   frequencyHz: number;
@@ -75,18 +76,28 @@ export function startPitchDetection(
 
   let stopped = false;
   let cleanup: () => void = () => {};
+  let frameCount = 0;
+  let chunkCount = 0;
+
+  debugLog(`pitch: startPitchDetection called ctxState=${audioContext.state}`);
 
   (async () => {
     try {
       if (!audioContext.audioWorklet) throw new Error("AudioWorklet unsupported");
       if (!workletRegistered.has(audioContext)) {
+        debugLog("pitch: addModule(/pitch-worklet.js) …");
         await audioContext.audioWorklet.addModule("/pitch-worklet.js");
         workletRegistered.add(audioContext);
+        debugLog("pitch: worklet module loaded");
       }
-      if (stopped) return;
+      if (stopped) { debugLog("pitch: stopped before node create"); return; }
 
       const node = new AudioWorkletNode(audioContext, "pitch-worklet");
+      debugLog("pitch: AudioWorkletNode created");
       node.port.onmessage = (ev: MessageEvent<Float32Array>) => {
+        chunkCount++;
+        if (chunkCount === 1)      debugLog("pitch: first chunk arrived");
+        else if (chunkCount === 50) debugLog(`pitch: 50 chunks, ${frameCount} frames so far`);
         const chunk = ev.data;
         let off = 0;
         while (off < chunk.length) {
@@ -96,6 +107,8 @@ export function startPitchDetection(
           off += n;
           if (bufferFill === bufferSize) {
             processFrame();
+            frameCount++;
+            if (frameCount === 1) debugLog("pitch: first frame processed");
             bufferFill = 0;
           }
         }
@@ -113,6 +126,7 @@ export function startPitchDetection(
         node.port.onmessage = null;
       };
     } catch (err) {
+      debugLog(`pitch: worklet init FAILED, falling back — ${err}`);
       // eslint-disable-next-line no-console
       console.warn("[pitchDetection] AudioWorklet init failed, falling back:", err);
       if (stopped) return;

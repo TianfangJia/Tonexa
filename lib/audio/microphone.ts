@@ -1,5 +1,7 @@
 // ── Microphone capture ─────────────────────────────────────────────────────
 
+import * as Tone from "tone";
+
 export interface MicrophoneHandle {
   audioContext: AudioContext;
   analyserNode: AnalyserNode;
@@ -30,14 +32,14 @@ export async function openMicrophone(
     video: false,
   });
 
-  // Safari falls back to the webkit-prefixed constructor on older versions,
-  // and always creates the context in `suspended` state. Without an explicit
-  // `resume()`, the downstream ScriptProcessorNode never fires onaudioprocess
-  // — pitch detection looks frozen even though the mic light is on.
-  const AC: typeof AudioContext =
-    window.AudioContext ||
-    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-  const audioContext = new AC();
+  // Share Tone.js's AudioContext instead of creating a second one. iOS/iPadOS
+  // Safari only allows a single active AudioContext — when Tone is running
+  // for piano playback AND the mic has its own context, iOS silently
+  // suspends one of them and the pitch detector stops receiving audio.
+  // `Tone.start()` resumes the context from the user-gesture chain that
+  // called us, so this also handles Safari's suspended-by-default state.
+  await Tone.start();
+  const audioContext = Tone.getContext().rawContext as unknown as AudioContext;
   if (audioContext.state === "suspended") {
     try { await audioContext.resume(); } catch { /* non-fatal */ }
   }
@@ -51,7 +53,8 @@ export async function openMicrophone(
   function stop() {
     sourceNode.disconnect();
     stream.getTracks().forEach((t) => t.stop());
-    if (audioContext.state !== "closed") audioContext.close();
+    // Do NOT close the audio context — it's Tone's shared context and piano
+    // playback still needs it for later modes / re-takes.
   }
 
   return { audioContext, analyserNode, sourceNode, stream, stop };

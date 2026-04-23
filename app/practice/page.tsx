@@ -585,7 +585,9 @@ export default function PracticePage() {
                 <span>
                   <strong className="font-semibold not-italic text-zinc-600">Full mode: </strong>
                   Sing the whole melody straight through, matching both pitch and
-                  rhythm. This is the final performance pass.
+                  rhythm. This is the final performance pass — your attempt is
+                  saved as an mp3 recording so your instructor can listen to it
+                  later.
                 </span>
               )}
             </footer>

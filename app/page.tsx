@@ -28,6 +28,21 @@ export default function HomePage() {
     setLoading(true);
     setError(null);
     try {
+      // Request microphone permission up front, while we're still in the
+      // click handler's user gesture. Opening the mic later (after a
+      // 12-beat intro on iOS Safari) loses the gesture chain and either
+      // delays the permission prompt or blocks the pipeline entirely.
+      // We drop the stream immediately — the browser caches the grant, so
+      // subsequent openMicrophone() calls inside practice resolve without
+      // prompting again.
+      try {
+        const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
+        probe.getTracks().forEach((t) => t.stop());
+      } catch {
+        // Permission denied or unsupported — let the student proceed anyway;
+        // each mode will surface its own mic error if needed.
+      }
+
       const student = await createStudent(name.trim());
       // Transposition defaults to "C" on the session record. The practice
       // page overrides this with the melody's own default key on load, and
@@ -78,6 +93,15 @@ export default function HomePage() {
           />
 
           {error && <p className="text-sm text-red-500">{error}</p>}
+
+          {/* Headphones keep the piano playback from leaking into the mic —
+              without them the pitch detector can pick up the reference tone
+              instead of the student's voice and mis-grade notes. */}
+          <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800">
+            🎧 <strong className="font-semibold">Headphones are strongly recommended.</strong>{" "}
+            They prevent the piano reference from bleeding into the microphone so your
+            singing can be graded accurately.
+          </p>
 
           <button
             type="submit"

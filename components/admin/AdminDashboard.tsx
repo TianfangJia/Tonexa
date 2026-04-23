@@ -15,9 +15,11 @@ export default function AdminDashboard() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/sessions");
-      if (!res.ok) throw new Error("Failed to fetch sessions");
-      const data = await res.json();
+      const res = await fetch("/api/sessions", { cache: "no-store" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(`Failed to fetch sessions (${res.status}): ${data.error ?? res.statusText}`);
+      }
       setRows(data.rows ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error loading data");

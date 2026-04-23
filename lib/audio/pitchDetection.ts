@@ -142,7 +142,12 @@ export function startPitchDetection(
       if (stopped) return;
 
       const processor = audioContext.createScriptProcessor(bufferSize, 1, 1);
+      debugLog("pitch: ScriptProcessor created (fallback)");
+      let scpCount = 0;
       processor.onaudioprocess = (event) => {
+        scpCount++;
+        if (scpCount === 1)       debugLog("pitch: ScriptProcessor first callback");
+        else if (scpCount === 20) debugLog(`pitch: ScriptProcessor 20 callbacks`);
         event.inputBuffer.copyFromChannel(inputBuffer, 0);
         processFrame();
       };

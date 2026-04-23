@@ -200,11 +200,17 @@ export default function PianoRoll({
     ctx.setLineDash([]);
     ctx.restore();
 
-    // ── Live pitch ball — two balls: actual pitch + octave higher ─
+    // ── Live pitch balls ────────────────────────────────────────
+    // Draw at most two balls:
+    //   1. The student's actual sung pitch at its real register.
+    //   2. The same pitch class shifted by the nearest whole octave to
+    //      the current target note's register — so a student singing an
+    //      octave off still sees whether they'd be on the note in the
+    //      right octave. Skipped when the shift is 0 (already in the
+    //      target register) or when the target is unknown.
     if (livePitchMidi != null && !isNaN(livePitchMidi)) {
-      const candidates = [livePitchMidi, livePitchMidi + 12];
-      for (const midi of candidates) {
-        if (midi < MIDI_MIN || midi > MIDI_MAX + 1) continue;
+      const drawBall = (midi: number) => {
+        if (midi < MIDI_MIN || midi > MIDI_MAX + 1) return;
         const ballY = midiToY(midi) + NOTE_HEIGHT / 2;
         ctx.beginPath();
         ctx.arc(ballX, ballY, 7, 0, Math.PI * 2);
@@ -213,6 +219,16 @@ export default function PianoRoll({
         ctx.strokeStyle = "#374151";
         ctx.lineWidth = 1.5;
         ctx.stroke();
+      };
+
+      drawBall(livePitchMidi);
+
+      const targetMidi = currentNoteIndex != null
+        ? targetNotes[currentNoteIndex]?.midi
+        : undefined;
+      if (targetMidi != null && !isNaN(targetMidi)) {
+        const octaveShift = Math.round((targetMidi - livePitchMidi) / 12) * 12;
+        if (octaveShift !== 0) drawBall(livePitchMidi + octaveShift);
       }
     }
 

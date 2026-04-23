@@ -28,11 +28,15 @@ const GRADE_NOTE_COLORS: Record<NoteGrade, string> = {
 // Replaces the Gaussian likelihood approach.
 // Returns a NoteGrade based on how many semitones off the detected pitch is.
 function gradeSimple(detectedMidi: number, targetMidi: number): NoteGrade {
-  // Also accept singing one octave lower (male voice range)
-  const diff = Math.min(
-    Math.abs(detectedMidi - targetMidi),
-    Math.abs(detectedMidi + 12 - targetMidi),
-  );
+  // Evaluate on pitch class — any octave of the target pitch passes. This
+  // matches the two-ball display (actual register + target-register ghost):
+  // as long as the student sings the correct pitch class in any register,
+  // they're "on the note". Folds detectedMidi onto the target's octave via
+  // semitone distance modulo 12, centred into [-6, 6] so diff is always
+  // the shortest path between the two pitch classes.
+  const raw = detectedMidi - targetMidi;
+  const pc  = ((raw % 12) + 12) % 12;        // 0..11
+  const diff = Math.abs(pc > 6 ? pc - 12 : pc); // 0..6
   if (diff <= 0.5) return "green";   // within 50 cents → pass
   if (diff <= 1.5) return "yellow";  // close
   if (diff <= 3.0) return "red";

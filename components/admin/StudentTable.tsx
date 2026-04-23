@@ -1,10 +1,42 @@
 "use client";
 import type { AdminStudentRow } from "@/types/session";
 import { getRecordingSignedUrl } from "@/lib/utils/audioStorage";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 interface Props {
   rows: AdminStudentRow[];
+}
+
+// Inline audio player for a recording row. Resolves the signed URL on mount
+// (lazy per row — signed URLs expire, so doing it at table mount would race
+// against the hour-long link lifetime if the admin leaves the page open).
+function RecordingPlayer({ storagePath }: { storagePath: string }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getRecordingSignedUrl(storagePath)
+      .then((u) => { if (!cancelled) setUrl(u); })
+      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : "Failed"); });
+    return () => { cancelled = true; };
+  }, [storagePath]);
+
+  if (error) return <span className="text-xs text-red-400">{error}</span>;
+  if (!url)  return <span className="text-xs text-zinc-400">Loading…</span>;
+
+  return (
+    <div className="flex items-center gap-2">
+      <audio controls preload="none" src={url} className="h-8 max-w-[220px]" />
+      <a
+        href={url}
+        download
+        className="rounded-lg bg-indigo-50 px-2 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-100"
+      >
+        ⬇
+      </a>
+    </div>
+  );
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -21,19 +53,6 @@ function modeStatus(row: AdminStudentRow, mode: 1 | 2 | 3 | 4): string {
 }
 
 export default function StudentTable({ rows }: Props) {
-  const [downloadingId, setDownloadingId] = useState<string | null>(null);
-
-  const handleDownload = async (row: AdminStudentRow) => {
-    if (!row.recording) return;
-    setDownloadingId(row.session.id);
-    try {
-      const url = await getRecordingSignedUrl(row.recording.storage_path);
-      window.open(url, "_blank");
-    } finally {
-      setDownloadingId(null);
-    }
-  };
-
   return (
     <div className="overflow-x-auto rounded-2xl border border-zinc-200">
       <table className="min-w-full text-sm">
@@ -80,15 +99,9 @@ export default function StudentTable({ rows }: Props) {
               <td className="px-4 py-3 text-xs text-zinc-400">
                 {new Date(row.session.started_at).toLocaleString()}
               </td>
-              <td className="px-4 py-3 text-center">
+              <td className="px-4 py-3">
                 {row.recording ? (
-                  <button
-                    onClick={() => handleDownload(row)}
-                    disabled={downloadingId === row.session.id}
-                    className="rounded-lg bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-100 disabled:opacity-50"
-                  >
-                    {downloadingId === row.session.id ? "…" : "Download"}
-                  </button>
+                  <RecordingPlayer storagePath={row.recording.storage_path} />
                 ) : (
                   <span className="text-zinc-300">—</span>
                 )}

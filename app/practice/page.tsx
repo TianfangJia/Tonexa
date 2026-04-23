@@ -22,6 +22,7 @@ import {
 } from "@/lib/musicxml/transposer";
 import { buildPitchOnlyMelody, buildPitchOnlyXml, extractFifths } from "@/lib/musicxml/pitchOnly";
 import { upsertResult } from "@/lib/db/results";
+import { updateSessionTransposition } from "@/lib/db/sessions";
 
 import ModeSelector from "@/components/ui/ModeSelector";
 import TranspositionSelector from "@/components/ui/TranspositionSelector";
@@ -125,6 +126,10 @@ export default function PracticePage() {
         const initialKey: TranspositionKey = parsed.defaultKey ?? "C";
         setTransposition(initialKey);
         applyTransposition(parsed, m, initialKey);
+        // Overwrite the session's placeholder transposition ("C" written at
+        // login time) with the melody's actual default key so the admin
+        // page reflects what the student is really working in.
+        void updateSessionTransposition(sid, initialKey).catch(() => {});
       })
       .catch(() => router.replace("/"));
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -157,8 +162,11 @@ export default function PracticePage() {
       if (parsedMelody && melodyRecord) {
         applyTransposition(parsedMelody, melodyRecord, newKey);
       }
+      if (sessionId) {
+        void updateSessionTransposition(sessionId, newKey).catch(() => {});
+      }
     },
-    [parsedMelody, melodyRecord, applyTransposition]
+    [parsedMelody, melodyRecord, applyTransposition, sessionId]
   );
 
   const handleAssignmentChange = useCallback(
@@ -175,6 +183,9 @@ export default function PracticePage() {
         const initialKey: TranspositionKey = parsed.defaultKey ?? "C";
         setTransposition(initialKey);
         applyTransposition(parsed, m, initialKey);
+        if (sessionId) {
+          void updateSessionTransposition(sessionId, initialKey).catch(() => {});
+        }
         setSungNotes([]);
         setPitchNoteIndex(0);
         setPitchScrollVersion((v) => v + 1);
@@ -182,7 +193,7 @@ export default function PracticePage() {
         currentSecRef.current = 0;
       } catch (_) {}
     },
-    [melodyRecord?.id, applyTransposition]
+    [melodyRecord?.id, applyTransposition, sessionId]
   );
 
   // ── Piano roll update ────────────────────────────────────
@@ -542,6 +553,42 @@ export default function PracticePage() {
               onComplete={(pct, summary) => handleModeComplete(4, pct, summary)}
               sessionId={sessionId}
             />
+          )}
+          {/* Mode footnote — a one-line reminder of what each mode asks the
+              student to do. Kept outside the mode components so all four share
+              a single consistent style. */}
+          {(mode === 1 || mode === 2 || mode === 3 || mode === 4) && (
+            <footer className="mt-6 border-t border-zinc-100 pt-3 text-xs italic leading-relaxed text-zinc-500">
+              {mode === 1 && (
+                <span>
+                  <strong className="font-semibold not-italic text-zinc-600">Pitch mode: </strong>
+                  Sing each target note in turn. When your voice matches the pitch,
+                  the app advances to the next one. Don&rsquo;t worry about rhythm here
+                  — take your time with every note.
+                </span>
+              )}
+              {mode === 2 && (
+                <span>
+                  <strong className="font-semibold not-italic text-zinc-600">Rhythm mode: </strong>
+                  Clap or tap the rhythm along with the metronome. Focus on timing
+                  only — pitch is ignored in this step.
+                </span>
+              )}
+              {mode === 3 && (
+                <span>
+                  <strong className="font-semibold not-italic text-zinc-600">Melody mode: </strong>
+                  Sing the melody one measure at a time. Each measure must pass on
+                  both pitch and rhythm before you move on to the next.
+                </span>
+              )}
+              {mode === 4 && (
+                <span>
+                  <strong className="font-semibold not-italic text-zinc-600">Full mode: </strong>
+                  Sing the whole melody straight through, matching both pitch and
+                  rhythm. This is the final performance pass.
+                </span>
+              )}
+            </footer>
           )}
         </section>
       </div>

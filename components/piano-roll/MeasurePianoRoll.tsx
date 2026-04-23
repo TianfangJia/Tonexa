@@ -5,7 +5,7 @@
 // orange pitch line drawn in real time during recording.
 
 import React, {
-  useEffect, useRef, useCallback, forwardRef, useImperativeHandle,
+  useEffect, useRef, useCallback, forwardRef, useImperativeHandle, useState,
 } from "react";
 import type { NoteEvent } from "@/types/music";
 
@@ -44,10 +44,28 @@ interface Props {
   className?: string;
 }
 
-const NOTE_HEIGHT  = 16;
-const KEY_WIDTH    = 44;
-const PITCH_PAD    = 8;  // semitones above/below note range
-const NOTE_NAMES   = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+// Default layout values (≥ sm viewports). A compact set kicks in below sm
+// so phones don't blow past the viewport height — see `useCompactLayout`.
+const NOTE_HEIGHT_DEFAULT = 16;
+const KEY_WIDTH_DEFAULT   = 44;
+const PITCH_PAD_DEFAULT   = 8;  // semitones above/below note range
+const NOTE_HEIGHT_COMPACT = 10;
+const KEY_WIDTH_COMPACT   = 30;
+const PITCH_PAD_COMPACT   = 4;
+const NOTE_NAMES          = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+
+/** True when the viewport is below Tailwind's `sm` breakpoint (640 px). */
+function useCompactLayout(): boolean {
+  const [compact, setCompact] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 639px)");
+    const update = () => setCompact(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+  return compact;
+}
 
 const COLORS = {
   blue:   { fill: "#c2d4fb", stroke: "#5c90f8" },
@@ -79,6 +97,11 @@ const MeasurePianoRoll = forwardRef<MeasurePianoRollHandle, Props>(function Meas
   targetNotes, measureDuration, noteGrades, isRecording,
   pxPerSec, className,
 }, ref) {
+  const compact = useCompactLayout();
+  const NOTE_HEIGHT = compact ? NOTE_HEIGHT_COMPACT : NOTE_HEIGHT_DEFAULT;
+  const KEY_WIDTH   = compact ? KEY_WIDTH_COMPACT   : KEY_WIDTH_DEFAULT;
+  const PITCH_PAD   = compact ? PITCH_PAD_COMPACT   : PITCH_PAD_DEFAULT;
+
   const canvasRef    = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   // Pitch line + cursor live in refs so pushes don't trigger React updates.
@@ -93,7 +116,7 @@ const MeasurePianoRoll = forwardRef<MeasurePianoRollHandle, Props>(function Meas
       minMidi: Math.min(...midis) - PITCH_PAD,
       maxMidi: Math.max(...midis) + PITCH_PAD,
     };
-  }, [targetNotes]);
+  }, [targetNotes, PITCH_PAD]);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -226,7 +249,7 @@ const MeasurePianoRoll = forwardRef<MeasurePianoRollHandle, Props>(function Meas
     }
 
     ctx.restore();
-  }, [targetNotes, measureDuration, noteGrades, getPitchRange, pxPerSec]);
+  }, [targetNotes, measureDuration, noteGrades, getPitchRange, pxPerSec, NOTE_HEIGHT, KEY_WIDTH]);
 
   // rAF-throttled redraw triggered by imperative methods. Multiple calls
   // per frame coalesce into a single redraw.
@@ -270,7 +293,7 @@ const MeasurePianoRoll = forwardRef<MeasurePianoRollHandle, Props>(function Meas
     canvas.style.width  = `${logicalW}px`;
     canvas.style.height = `${logicalH}px`;
     draw();
-  }, [getPitchRange, draw, pxPerSec, measureDuration]);
+  }, [getPitchRange, draw, pxPerSec, measureDuration, NOTE_HEIGHT, KEY_WIDTH]);
 
   useEffect(() => { resize(); }, [resize]);
   useEffect(() => { draw();   }, [draw]);

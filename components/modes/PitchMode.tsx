@@ -321,31 +321,38 @@ export default function PitchMode({
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between rounded-2xl bg-zinc-50 px-6 py-4 min-h-[88px]">
-        <div className="flex items-center gap-3">
+        {/* Below sm the target-note card stacks on top of the control
+            buttons; at sm and up they sit in one row. */}
+        <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center">
           <div>
             <p className="text-xs font-medium uppercase tracking-wide text-zinc-400">Target note</p>
             <p className="text-3xl font-bold text-zinc-900">
               {currentNote ? midiToNoteName(currentNote.midi) : "—"}
             </p>
           </div>
-          <button onClick={handleReplayTarget}
-            className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50 active:scale-95 transition-all">
-            ▶ Play
-          </button>
-          {/* Auto-play toggle switch */}
-          <button
-            onClick={() => setAutoPlay((v) => !v)}
-            className="flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50 active:scale-95 transition-all"
-          >
-            <span className={`relative inline-flex h-3.5 w-6 flex-shrink-0 rounded-full transition-colors duration-200 ${autoPlay ? "bg-indigo-500" : "bg-zinc-300"}`}>
-              <span className={`inline-block h-2.5 w-2.5 translate-y-[1px] rounded-full bg-white shadow transition-transform duration-200 ${autoPlay ? "translate-x-[13px]" : "translate-x-[1px]"}`} />
-            </span>
-            Auto-play
-          </button>
+          <div className="flex items-center gap-3">
+            <button onClick={handleReplayTarget}
+              className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50 active:scale-95 transition-all">
+              ▶ Play
+            </button>
+            {/* Auto-play toggle switch */}
+            <button
+              onClick={() => setAutoPlay((v) => !v)}
+              className="flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50 active:scale-95 transition-all"
+            >
+              <span className={`relative inline-flex h-3.5 w-6 flex-shrink-0 rounded-full transition-colors duration-200 ${autoPlay ? "bg-indigo-500" : "bg-zinc-300"}`}>
+                <span className={`inline-block h-2.5 w-2.5 translate-y-[1px] rounded-full bg-white shadow transition-transform duration-200 ${autoPlay ? "translate-x-[13px]" : "translate-x-[1px]"}`} />
+              </span>
+              Auto-play
+            </button>
+          </div>
         </div>
         <div className="flex flex-col items-end gap-1">
-          <p className="text-xs text-zinc-400">{noteIndex + 1} / {pitchNotes.length}</p>
           {currentGrade && <FeedbackBadge grade={currentGrade} size="lg" />}
+          {/* Counter hidden below sm to save horizontal space on phones. */}
+          <p className="hidden text-xs text-zinc-400 sm:block">
+            {noteIndex + 1} / {pitchNotes.length}
+          </p>
         </div>
       </div>
 

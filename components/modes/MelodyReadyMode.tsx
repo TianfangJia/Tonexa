@@ -34,7 +34,7 @@ import { saveRecording } from "@/lib/db/results";
 // Mirrors MelodyMode — keep in sync if you change either.
 const GREEN_THRESH  = 1;
 const YELLOW_THRESH = 2;
-const PASS_RATIO    = 0.80;
+const PASS_RATIO    = 0.70;
 
 // Fixed pixels-per-second for the full-melody roll. Wider than auto-fit
 // so individual notes are readable; the parent wraps in overflow-x-auto
@@ -187,7 +187,7 @@ export default function MelodyReadyMode({
 
       let grade: MeasureGrade;
       if      (diff <= GREEN_THRESH)  { grade = "green";  score += 1; }
-      else if (diff <= YELLOW_THRESH) { grade = "yellow"; score += 0.5; }
+      else if (diff <= YELLOW_THRESH) { grade = "yellow"; score += 0.75; }
       else                             { grade = "red"; }
       grades.set(i, grade);
     }

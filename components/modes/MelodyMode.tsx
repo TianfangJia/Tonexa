@@ -31,7 +31,7 @@ import Celebration from "@/components/ui/Celebration";
 const GREEN_THRESH  = 1;    // ≤ 1 semitone   → green  (full credit)
 const YELLOW_THRESH = 2;    // ≤ 2 semitones  → yellow (half credit)
 //                          > 2 semitones  → red    (no credit)
-const PASS_RATIO    = 0.80; // ≥ 80 % weighted → pass
+const PASS_RATIO    = 0.70; // ≥ 70 % weighted → pass
 
 type Phase =
   | "idle"
@@ -271,7 +271,7 @@ export default function MelodyMode({
 
       let grade: MeasureGrade;
       if (diff <= GREEN_THRESH)  { grade = "green";  score += 1; }
-      else if (diff <= YELLOW_THRESH) { grade = "yellow"; score += 0.5; }
+      else if (diff <= YELLOW_THRESH) { grade = "yellow"; score += 0.75; }
       else                            { grade = "red"; }
       grades.set(i, grade);
     }

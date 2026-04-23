@@ -61,7 +61,7 @@ const MelodyMeasureCard = forwardRef<MeasurePianoRollHandle, Props>(
 
     return (
       <div className={`rounded-2xl border border-zinc-100 p-4 ${className ?? ""}`}>
-        <p className="mb-3 text-base font-semibold uppercase tracking-wide text-zinc-500">
+        <p className="mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-500 sm:text-base">
           Measure by Measure Practice — {measureLabel}
         </p>
         <div className="flex flex-col gap-4">

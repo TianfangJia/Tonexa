@@ -337,7 +337,7 @@ export default function PracticePage() {
             <select
               value={melodyRecord.id}
               onChange={(e) => handleAssignmentChange(e.target.value)}
-              className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              className="max-w-[33vw] truncate rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
             >
               {allMelodies.map((m) => (
                 <option key={m.id} value={m.id}>{m.title}</option>
@@ -359,7 +359,7 @@ export default function PracticePage() {
             // Two-column grid: tempo on the left, key on the right.
             // `items-center` aligns them to a shared invisible horizontal
             // midline — the slider's track lines up with the Key select.
-            <div className="grid w-full grid-cols-2 items-center gap-6">
+            <div className="grid w-full grid-cols-1 items-center gap-6 sm:grid-cols-2">
               <TempoSlider
                 baseTempo={baseTempo}
                 beatUnit={transposedMelody.beatUnit}
@@ -496,7 +496,7 @@ export default function PracticePage() {
         <section className={`flex-1 overflow-y-auto px-4 pb-8 ${mode === 0 ? "pt-6" : "py-3"}`}>
           {mode === 0 && (
             <div className="flex flex-col gap-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <TonalWarmup musicKey={transposition} />
                 {/* Welcome / encouragement card on the right. Gives the
                     student a quick sense of what the app does before they

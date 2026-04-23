@@ -62,15 +62,29 @@ export default function TonalWarmup({ musicKey, noteSec = 0.5 }: Props) {
           <p className="text-sm text-zinc-600">
             {musicKey} major — play through to settle into the key
           </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {/* "Downward" switch — off = ascending, on = descending. Matches
-              the Auto-play toggle pattern from Pitch mode for visual consistency. */}
+          {/* Mobile-only copy of the Downward switch — tucked directly
+              under the helper text below sm. The sm+ copy lives next to
+              Play to the right; both share the same toggleDirection handler. */}
           <button
             onClick={toggleDirection}
             aria-label={`Downward scale ${direction === "down" ? "on" : "off"}`}
             title={`Downward scale ${direction === "down" ? "on" : "off"}`}
-            className="flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50 active:scale-95 transition-all"
+            className="mt-2 flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50 active:scale-95 transition-all sm:hidden"
+          >
+            <span className={`relative inline-flex h-3.5 w-6 flex-shrink-0 rounded-full transition-colors duration-200 ${direction === "down" ? "bg-indigo-500" : "bg-zinc-300"}`}>
+              <span className={`inline-block h-2.5 w-2.5 translate-y-[1px] rounded-full bg-white shadow transition-transform duration-200 ${direction === "down" ? "translate-x-[13px]" : "translate-x-[1px]"}`} />
+            </span>
+            Downward
+          </button>
+        </div>
+        <div className="flex items-center gap-2">
+          {/* "Downward" switch — off = ascending, on = descending. Hidden
+              below sm (the mobile copy above replaces it there). */}
+          <button
+            onClick={toggleDirection}
+            aria-label={`Downward scale ${direction === "down" ? "on" : "off"}`}
+            title={`Downward scale ${direction === "down" ? "on" : "off"}`}
+            className="hidden items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50 active:scale-95 transition-all sm:flex"
           >
             <span className={`relative inline-flex h-3.5 w-6 flex-shrink-0 rounded-full transition-colors duration-200 ${direction === "down" ? "bg-indigo-500" : "bg-zinc-300"}`}>
               <span className={`inline-block h-2.5 w-2.5 translate-y-[1px] rounded-full bg-white shadow transition-transform duration-200 ${direction === "down" ? "translate-x-[13px]" : "translate-x-[1px]"}`} />

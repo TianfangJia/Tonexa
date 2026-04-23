@@ -50,12 +50,18 @@ export function startPitchDetection(
 
   const MIN_RMS = 0.005; // reject background noise and piano echo through speakers
 
+  let loggedFirstPitch = false;
+  let loggedFirstSilence = false;
   const processFrame = () => {
     let sumSq = 0;
     for (let i = 0; i < bufferSize; i++) sumSq += inputBuffer[i] * inputBuffer[i];
     const rms = Math.sqrt(sumSq / bufferSize);
 
     if (rms < MIN_RMS) {
+      if (!loggedFirstSilence) {
+        debugLog(`pitch: first silent frame rms=${rms.toFixed(5)}`);
+        loggedFirstSilence = true;
+      }
       smoothedHz = 0;
       onPitch(null);
       return;
@@ -67,6 +73,10 @@ export function startPitchDetection(
       smoothedHz = smoothedHz > 0
         ? SMOOTH_ALPHA * pitch + (1 - SMOOTH_ALPHA) * smoothedHz
         : pitch;
+      if (!loggedFirstPitch) {
+        debugLog(`pitch: first voiced frame rms=${rms.toFixed(3)} hz=${pitch.toFixed(1)}`);
+        loggedFirstPitch = true;
+      }
       onPitch({ frequencyHz: smoothedHz, clarity, timestampSec: audioContext.currentTime });
     } else {
       smoothedHz = 0;

@@ -21,8 +21,13 @@ export async function openMicrophone(
   // signal often sits below the RMS gate in pitchDetection.ts and every frame
   // gets rejected as silence. Let the browser apply automatic gain control
   // on iOS so the student's voice actually crosses the threshold.
-  const isIOS = typeof navigator !== "undefined" &&
-    /iPad|iPhone|iPod/.test(navigator.userAgent);
+  // Modern iPadOS reports `MacIntel` for platform and omits "iPad" from the
+  // UA string — using only the UA regex, a real iPad returns `isIOS=false`
+  // and never gets AGC. Fallback: any touch-capable Mac platform is an iPad.
+  const isIOS = typeof navigator !== "undefined" && (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && (navigator.maxTouchPoints ?? 0) > 1)
+  );
   debugLog(`mic: getUserMedia (isIOS=${isIOS})`);
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: {

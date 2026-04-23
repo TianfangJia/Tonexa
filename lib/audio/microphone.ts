@@ -1,5 +1,6 @@
 // ── Microphone capture ─────────────────────────────────────────────────────
 
+import * as Tone from "tone";
 import { debugLog } from "@/components/ui/DebugHUD";
 
 export interface MicrophoneHandle {
@@ -39,15 +40,24 @@ export async function openMicrophone(
   });
   debugLog(`mic: stream active=${stream.active} tracks=${stream.getTracks().length}`);
 
-  // Safari falls back to the webkit-prefixed constructor on older versions,
-  // and always creates the context in `suspended` state. Without an explicit
-  // `resume()`, the downstream ScriptProcessorNode never fires onaudioprocess
-  // — pitch detection looks frozen even though the mic light is on.
-  const AC: typeof AudioContext =
-    window.AudioContext ||
-    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-  const audioContext = new AC();
-  debugLog(`mic: ctx created state=${audioContext.state} sr=${audioContext.sampleRate}`);
+  // On iOS/iPadOS, only one AudioContext can own the audio session. When
+  // Tone.js already has one (for piano playback), a second context for the
+  // mic gets silently starved — createMediaStreamSource returns near-zero
+  // samples. Reusing Tone's context on iOS avoids that; every other
+  // platform keeps its own fresh mic context (the prior behaviour that
+  // works on macOS Safari + Chrome + Firefox).
+  let audioContext: AudioContext;
+  if (isIOS) {
+    await Tone.start();
+    audioContext = Tone.getContext().rawContext as unknown as AudioContext;
+    debugLog(`mic: reusing Tone ctx state=${audioContext.state} sr=${audioContext.sampleRate}`);
+  } else {
+    const AC: typeof AudioContext =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    audioContext = new AC();
+    debugLog(`mic: ctx created state=${audioContext.state} sr=${audioContext.sampleRate}`);
+  }
   if (audioContext.state === "suspended") {
     try {
       await audioContext.resume();
@@ -66,7 +76,9 @@ export async function openMicrophone(
   function stop() {
     sourceNode.disconnect();
     stream.getTracks().forEach((t) => t.stop());
-    if (audioContext.state !== "closed") audioContext.close();
+    // Only close the context if we created a fresh one. Tone's context is
+    // shared with the piano sampler and closing it would kill playback.
+    if (!isIOS && audioContext.state !== "closed") audioContext.close();
   }
 
   return { audioContext, analyserNode, sourceNode, stream, stop };

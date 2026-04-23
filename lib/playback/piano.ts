@@ -4,6 +4,7 @@
 
 import * as Tone from "tone";
 import { midiToNoteName } from "@/lib/utils/midiUtils";
+import { getSharedAudioContext } from "@/lib/audio/audioContext";
 
 // Cache the *loading promise* — not the sampler reference — so callers that
 // await getSampler() don't receive a half-constructed sampler whose buffers
@@ -11,8 +12,12 @@ import { midiToNoteName } from "@/lib/utils/midiUtils";
 let samplerLoad: Promise<Tone.Sampler> | null = null;
 let samplerRef: Tone.Sampler | null = null;
 
-function getSampler(): Promise<Tone.Sampler> {
+async function getSampler(): Promise<Tone.Sampler> {
   if (samplerLoad) return samplerLoad;
+  // Install our shared native AudioContext into Tone BEFORE constructing any
+  // Tone node — otherwise Tone spins up its own default context and we end
+  // up with two on iOS (the exact bug this file exists to avoid).
+  await getSharedAudioContext();
   samplerLoad = new Promise<Tone.Sampler>((resolve, reject) => {
     const s = new Tone.Sampler({
       urls: {

@@ -1,6 +1,6 @@
 // ── Microphone capture ─────────────────────────────────────────────────────
 
-import * as Tone from "tone";
+import { getSharedAudioContext } from "./audioContext";
 import { debugLog } from "@/components/ui/DebugHUD";
 
 export interface MicrophoneHandle {
@@ -40,32 +40,12 @@ export async function openMicrophone(
   });
   debugLog(`mic: stream active=${stream.active} tracks=${stream.getTracks().length}`);
 
-  // On iOS/iPadOS, only one AudioContext can own the audio session. When
-  // Tone.js already has one (for piano playback), a second context for the
-  // mic gets silently starved — createMediaStreamSource returns near-zero
-  // samples. Reusing Tone's context on iOS avoids that; every other
-  // platform keeps its own fresh mic context (the prior behaviour that
-  // works on macOS Safari + Chrome + Firefox).
-  let audioContext: AudioContext;
-  if (isIOS) {
-    await Tone.start();
-    audioContext = Tone.getContext().rawContext as unknown as AudioContext;
-    debugLog(`mic: reusing Tone ctx state=${audioContext.state} sr=${audioContext.sampleRate}`);
-  } else {
-    const AC: typeof AudioContext =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    audioContext = new AC();
-    debugLog(`mic: ctx created state=${audioContext.state} sr=${audioContext.sampleRate}`);
-  }
-  if (audioContext.state === "suspended") {
-    try {
-      await audioContext.resume();
-      debugLog(`mic: ctx resume() ok state=${audioContext.state}`);
-    } catch (e) {
-      debugLog(`mic: ctx resume FAILED ${e}`);
-    }
-  }
+  // Reuse the shared native AudioContext (created via getSharedAudioContext,
+  // installed into Tone on first use). One context per tab fixes iOS's
+  // single-session restriction, and because it's a real native context,
+  // AudioWorkletNode construction works too.
+  const audioContext = await getSharedAudioContext();
+  debugLog(`mic: shared ctx state=${audioContext.state} sr=${audioContext.sampleRate}`);
 
   const sourceNode = audioContext.createMediaStreamSource(stream);
   const analyserNode = audioContext.createAnalyser();
@@ -76,9 +56,8 @@ export async function openMicrophone(
   function stop() {
     sourceNode.disconnect();
     stream.getTracks().forEach((t) => t.stop());
-    // Only close the context if we created a fresh one. Tone's context is
-    // shared with the piano sampler and closing it would kill playback.
-    if (!isIOS && audioContext.state !== "closed") audioContext.close();
+    // Don't close — the shared context is reused across mic sessions and by
+    // Tone for piano playback.
   }
 
   return { audioContext, analyserNode, sourceNode, stream, stop };
